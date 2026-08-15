@@ -1357,6 +1357,8 @@ export function AppContent() {
       {isExportOpen && (
         <ExportMenu
           onClose={() => setIsExportOpen(false)}
+          nodes={nodesWithChildCounts}
+          edges={edges}
           settings={settings}
           onNotify={showNotification}
         />
