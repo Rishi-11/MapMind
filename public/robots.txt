@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+
+# Googlebot & Bingbot specific directives
+User-agent: Googlebot
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+Sitemap: https://rishi-11.github.io/MapMind/sitemap.xml

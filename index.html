@@ -5,32 +5,83 @@
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='3'/><path d='M3 12h6m6 0h6M12 3v6m0 6v6'/></svg>" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     
-    <!-- Search Engine Verification & Enterprise Security Classification -->
+    <!-- Search Engine Verification -->
     <meta name="google-site-verification" content="NMhmYdYIs2xad-C8D7x7qdRUxrdzdrzA6W_UzaS1qBU" />
     <meta name="msvalidate.01" content="C1EC709A176A9541AFB93CEC99BCFD99" />
-    <title>MapMind - Interactive Mind Map & Diagram Canvas</title>
-    <meta name="description" content="Secure, offline-first diagramming and whiteboard application. Create interactive mind maps, architecture diagrams, and workflows with zero tracking." />
+    
+    <!-- Primary SEO Metadata -->
+    <title>MapMind - Free Online Mind Mapping & Diagramming Tool</title>
+    <meta name="title" content="MapMind - Free Online Mind Mapping & Diagramming Tool" />
+    <meta name="description" content="MapMind is a free, fast, and private online diagramming and mind mapping workspace. Generate mind maps from AI chat, auto-layout complex trees, and export clean vector graphics." />
+    <meta name="keywords" content="mind map online, free mind mapping, diagram software, flow chart maker, AI mind map generator, tree diagram, architecture diagram, whiteboard online, dagre elk layout, offline diagram tool" />
+    <meta name="author" content="MapMind" />
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
+    <meta name="theme-color" content="#3b82f6" />
+    
+    <!-- Canonical URL -->
+    <link rel="canonical" href="https://rishi-11.github.io/MapMind/" />
+    
+    <!-- Open Graph / Facebook / LinkedIn -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://rishi-11.github.io/MapMind/" />
+    <meta property="og:site_name" content="MapMind" />
+    <meta property="og:title" content="MapMind - Free Online Mind Mapping & Diagram Canvas" />
+    <meta property="og:description" content="Generate instant mind maps from AI conversations (ChatGPT, Claude, Gemini). Keyboard-driven, offline-first diagramming with automatic balanced layouts." />
+    
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content="https://rishi-11.github.io/MapMind/" />
+    <meta name="twitter:title" content="MapMind - Free Online Mind Mapping & Diagram Canvas" />
+    <meta name="twitter:description" content="Create structured mind maps and system architecture diagrams with AI prompt generation, ELK/Dagre layouts, and zero tracking." />
+    
+    <!-- Enterprise Categorization -->
     <meta name="application-name" content="MapMind" />
     <meta name="category" content="Productivity, Business, Developer Tools, Software" />
-    <meta name="keywords" content="mind map, diagramming, whiteboard, flow chart, system architecture, productivity, offline-first" />
-    <meta name="robots" content="index, follow" />
     <meta name="rating" content="safe for work" />
-    <meta name="referrer" content="no-referrer" />
-    
-    <!-- Open Graph (Classification for Web Scanners) -->
-    <meta property="og:title" content="MapMind - Interactive Mind Map & Diagram Canvas" />
-    <meta property="og:description" content="Secure, client-side-only mind mapping and diagramming software. Zero tracking, offline-first." />
-    <meta property="og:type" content="website" />
     
     <!-- PWA Manifest for Offline Installation -->
     <link rel="manifest" href="./manifest.json" />
 
-    <!-- Google Fonts with robust local OS system font fallbacks -->
+    <!-- Google Fonts with local system fallbacks -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <!-- Schema.org JSON-LD Structured Data for Google & Bing -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "MapMind",
+      "url": "https://rishi-11.github.io/MapMind/",
+      "applicationCategory": "ProductivityApplication",
+      "operatingSystem": "All modern browsers (Chrome, Edge, Safari, Firefox)",
+      "browserRequirements": "Requires JavaScript. Requires HTML5.",
+      "description": "Interactive client-side mind mapping, diagramming, and whiteboard workspace with AI chat-to-mindmap generation, DAG/ELK layout engines, Time Machine IndexedDB history, and vector export.",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "featureList": [
+        "AI Chat to Mind Map generation (ChatGPT, Claude, Gemini, DeepSeek)",
+        "Zero-mouse keyboard navigation and quick node creation",
+        "Dagre and ELK balanced radial graph layout algorithms",
+        "IndexedDB Time Machine 3-minute automatic revision history",
+        "High resolution vector SVG, PDF, and PNG export",
+        "Client-side offline-first architecture with zero tracking"
+      ]
+    }
+    </script>
   </head>
   <body class="bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 antialiased overflow-hidden select-none">
+    <noscript>
+      <div style="padding: 20px; font-family: sans-serif; text-align: center;">
+        <h1>MapMind - Free Online Mind Mapping & Diagramming Workspace</h1>
+        <p>MapMind is an advanced, client-side diagramming and whiteboard application for visual brainstorming, system architecture mapping, and idea structuring.</p>
+        <p>Please enable JavaScript in your browser to interact with the canvas.</p>
+      </div>
+    </noscript>
     <div id="root"></div>
     <script type="module" src="./src/main.tsx"></script>
   </body>
