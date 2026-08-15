@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233b82f6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='3'/><path d='M3 12h6m6 0h6M12 3v6m0 6v6'/></svg>" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     
     <!-- Search Engine Verification -->
@@ -29,7 +29,7 @@
     <meta property="og:description" content="Generate instant mind maps from AI conversations (ChatGPT, Claude, Gemini). Keyboard-driven, offline-first diagramming with automatic balanced layouts." />
     
     <!-- Twitter Card -->
-    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:card" content="summary" />
     <meta name="twitter:url" content="https://rishi-11.github.io/MapMind/" />
     <meta name="twitter:title" content="MapMind - Free Online Mind Mapping & Diagram Canvas" />
     <meta name="twitter:description" content="Create structured mind maps and system architecture diagrams with AI prompt generation, ELK/Dagre layouts, and zero tracking." />
@@ -51,38 +51,104 @@
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
-      "@type": "WebApplication",
-      "name": "MapMind",
-      "url": "https://rishi-11.github.io/MapMind/",
-      "applicationCategory": "ProductivityApplication",
-      "operatingSystem": "All modern browsers (Chrome, Edge, Safari, Firefox)",
-      "browserRequirements": "Requires JavaScript. Requires HTML5.",
-      "description": "Interactive client-side mind mapping, diagramming, and whiteboard workspace with AI chat-to-mindmap generation, DAG/ELK layout engines, Time Machine IndexedDB history, and vector export.",
-      "offers": {
-        "@type": "Offer",
-        "price": "0",
-        "priceCurrency": "USD"
-      },
-      "featureList": [
-        "AI Chat to Mind Map generation (ChatGPT, Claude, Gemini, DeepSeek)",
-        "Zero-mouse keyboard navigation and quick node creation",
-        "Dagre and ELK balanced radial graph layout algorithms",
-        "IndexedDB Time Machine 3-minute automatic revision history",
-        "High resolution vector SVG, PDF, and PNG export",
-        "Client-side offline-first architecture with zero tracking"
+      "@graph": [
+        {
+          "@type": "WebApplication",
+          "name": "MapMind",
+          "url": "https://rishi-11.github.io/MapMind/",
+          "applicationCategory": "ProductivityApplication",
+          "operatingSystem": "All modern browsers (Chrome, Edge, Safari, Firefox)",
+          "browserRequirements": "Requires JavaScript. Requires HTML5.",
+          "description": "Interactive client-side mind mapping, diagramming, and whiteboard workspace with AI chat-to-mindmap generation, DAG/ELK layout engines, Time Machine IndexedDB history, and vector export.",
+          "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+          },
+          "featureList": [
+            "AI Chat to Mind Map generation (ChatGPT, Claude, Gemini, DeepSeek)",
+            "Zero-mouse keyboard navigation and quick node creation",
+            "Dagre and ELK balanced radial graph layout algorithms",
+            "IndexedDB Time Machine automatic revision history",
+            "High resolution vector SVG, PDF, and PNG export",
+            "Client-side offline-first architecture with zero tracking"
+          ]
+        },
+        {
+          "@type": "FAQPage",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "What is MapMind?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "MapMind is a free, privacy-first online mind mapping and diagramming tool that runs entirely in your browser with AI prompt integration, automatic tree and DAG layout engines, and instant export."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Is MapMind free to use?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Yes, MapMind is completely free, open-source, and requires no sign-up or subscription."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Is my data private and secure in MapMind?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Yes. MapMind uses local storage and IndexedDB. Your diagrams and mind maps never leave your browser unless you choose to export them."
+              }
+            }
+          ]
+        }
       ]
     }
     </script>
   </head>
   <body class="bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 antialiased overflow-hidden select-none">
     <noscript>
-      <div style="padding: 20px; font-family: sans-serif; text-align: center;">
-        <h1>MapMind - Free Online Mind Mapping & Diagramming Workspace</h1>
-        <p>MapMind is an advanced, client-side diagramming and whiteboard application for visual brainstorming, system architecture mapping, and idea structuring.</p>
-        <p>Please enable JavaScript in your browser to interact with the canvas.</p>
+      <div style="padding: 24px; font-family: system-ui, -apple-system, sans-serif; text-align: center; max-width: 700px; margin: 40px auto; line-height: 1.6;">
+        <h1 style="font-size: 24px; font-weight: 700; color: #1e293b;">MapMind - Free Online Mind Mapping & Diagramming Workspace</h1>
+        <p style="color: #475569; margin-top: 12px;">MapMind is an advanced, client-side diagramming and whiteboard application for visual brainstorming, system architecture mapping, and idea structuring.</p>
+        <p style="color: #64748b; font-size: 14px; margin-top: 16px;">Please enable JavaScript in your browser to interact with the full canvas workspace.</p>
       </div>
     </noscript>
-    <div id="root"></div>
+
+    <!-- Semantic Initial DOM Shell: Hydrated instantly by React, crawled by Googlebot without requiring JS execution delay -->
+    <div id="root">
+      <main style="max-width: 800px; margin: 40px auto; padding: 24px; font-family: system-ui, -apple-system, sans-serif;">
+        <header>
+          <h1 style="font-size: 28px; font-weight: 800; color: #0f172a; margin-bottom: 8px;">MapMind — Free Online Mind Mapping & Diagram Canvas</h1>
+          <p style="font-size: 16px; color: #475569;">The fast, private, and AI-powered diagram workspace for thinkers, creators, and engineers.</p>
+        </header>
+
+        <section style="margin-top: 24px;">
+          <h2 style="font-size: 20px; font-weight: 700; color: #1e293b; margin-bottom: 12px;">Key Features</h2>
+          <ul style="color: #334155; line-height: 1.8;">
+            <li><strong>AI Chat to Mind Map:</strong> Paste structured responses from ChatGPT, Claude, Gemini, or DeepSeek and instantly convert them to interactive visual graphs.</li>
+            <li><strong>Intelligent Auto-Layout:</strong> Powered by Dagre and ELK algorithms for hierarchical, radial, and balanced node distribution.</li>
+            <li><strong>Keyboard-First Speed:</strong> Create child nodes (Tab), sibling nodes (Enter), and navigate your maps without taking your hands off the keyboard.</li>
+            <li><strong>100% Client-Side Privacy:</strong> Your data remains exclusively in your browser's IndexedDB storage with zero tracking or telemetry.</li>
+            <li><strong>Vector Export:</strong> Export your mind maps as high-resolution PNG, SVG, or PDF formats.</li>
+          </ul>
+        </section>
+
+        <section style="margin-top: 24px;">
+          <h2 style="font-size: 20px; font-weight: 700; color: #1e293b; margin-bottom: 12px;">Frequently Asked Questions</h2>
+          <article style="margin-bottom: 16px;">
+            <h3 style="font-size: 16px; font-weight: 600; color: #1e293b;">How do I create a mind map online for free?</h3>
+            <p style="color: #475569; font-size: 14px;">Open MapMind in any modern browser, double-click or use Tab/Enter to create nodes, or use the AI import tool to convert notes into diagrams instantly.</p>
+          </article>
+          <article style="margin-bottom: 16px;">
+            <h3 style="font-size: 16px; font-weight: 600; color: #1e293b;">Do I need to sign up or create an account?</h3>
+            <p style="color: #475569; font-size: 14px;">No. MapMind requires no account, sign-up, or installation. It works directly in your web browser.</p>
+          </article>
+        </section>
+      </main>
+    </div>
+
     <script type="module" src="./src/main.tsx"></script>
   </body>
 </html>

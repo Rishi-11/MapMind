@@ -21,6 +21,7 @@ interface OutlineNavigatorDrawerProps {
   selectedNodeId: string | null;
   onSelectNode: (nodeId: string) => void;
   onFoldLevel: (level: number | 'all-expand' | 'all-collapse') => void;
+  onToggleCollapse?: (nodeId: string) => void;
 }
 
 interface TreeNode {
@@ -43,6 +44,7 @@ export const OutlineNavigatorDrawer: React.FC<OutlineNavigatorDrawerProps> = ({
   selectedNodeId,
   onSelectNode,
   onFoldLevel,
+  onToggleCollapse,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -110,10 +112,9 @@ export const OutlineNavigatorDrawer: React.FC<OutlineNavigatorDrawerProps> = ({
     const isSelected = item.id === selectedNodeId;
     return (
       <div key={item.id} className="space-y-0.5">
-        <button
-          type="button"
+        <div
           onClick={() => onSelectNode(item.id)}
-          className={`w-full text-left p-2 rounded-xl text-xs transition-all flex items-center gap-2 group ${
+          className={`w-full text-left p-2 rounded-xl text-xs transition-all flex items-center gap-2 group cursor-pointer ${
             isSelected
               ? 'bg-blue-500 text-white font-bold shadow-xs'
               : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200'
@@ -121,11 +122,21 @@ export const OutlineNavigatorDrawer: React.FC<OutlineNavigatorDrawerProps> = ({
           style={{ paddingLeft: `${Math.max(8, item.depth * 14 + 6)}px` }}
         >
           {item.children.length > 0 ? (
-            item.collapsed ? (
-              <ChevronRight className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-white' : 'text-slate-400'}`} />
-            ) : (
-              <ChevronDown className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-white' : 'text-slate-400'}`} />
-            )
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleCollapse?.(item.id);
+              }}
+              title={item.collapsed ? 'Expand branch (Compact layout will adjust)' : 'Collapse branch (Compact layout will adjust)'}
+              className="p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors"
+            >
+              {item.collapsed ? (
+                <ChevronRight className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-white' : 'text-amber-500 font-bold'}`} />
+              ) : (
+                <ChevronDown className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-white' : 'text-slate-400'}`} />
+              )}
+            </button>
           ) : (
             <span
               className={`w-1.5 h-1.5 rounded-full shrink-0 ${
@@ -146,14 +157,18 @@ export const OutlineNavigatorDrawer: React.FC<OutlineNavigatorDrawerProps> = ({
 
           {item.children.length > 0 && (
             <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-              isSelected ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+              isSelected
+                ? 'bg-white/20 text-white'
+                : item.collapsed
+                ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 font-bold'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
             }`}>
               {item.children.length}
             </span>
           )}
-        </button>
+        </div>
 
-        {item.children.length > 0 && (
+        {item.children.length > 0 && !item.collapsed && (
           <div className="space-y-0.5">
             {item.children.map((child) => renderTreeItem(child))}
           </div>

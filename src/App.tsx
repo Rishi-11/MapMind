@@ -173,6 +173,7 @@ export function AppContent() {
   const [isTimeMachineOpen, setIsTimeMachineOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [isLayouting, setIsLayouting] = useState(false);
+  const [currentLayout, setCurrentLayout] = useState<LayoutDirection>('BALANCED_MINDMAP');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   const [settings, setSettings] = useState<CanvasSettings>({
@@ -187,6 +188,7 @@ export function AppContent() {
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
   const selectedNodeIdRef = useRef(selectedNodeId);
+  const currentLayoutRef = useRef(currentLayout);
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -199,6 +201,10 @@ export function AppContent() {
   useEffect(() => {
     selectedNodeIdRef.current = selectedNodeId;
   }, [selectedNodeId]);
+
+  useEffect(() => {
+    currentLayoutRef.current = currentLayout;
+  }, [currentLayout]);
 
   const showNotification = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, type });
@@ -402,90 +408,152 @@ export function AppContent() {
     );
   }, [setNodes]);
 
+  // Helper to re-calculate layout for visible nodes
+  const recalculateLayout = useCallback(
+    async (
+      targetNodes: MapMindNode[],
+      targetEdges: MapMindEdge[],
+      layoutMode: LayoutDirection = currentLayoutRef.current
+    ): Promise<MapMindNode[]> => {
+      try {
+        if (layoutMode === 'BALANCED_MINDMAP') {
+          const res = await getElkLayout(targetNodes, targetEdges);
+          return res.nodes;
+        } else {
+          const res = getDagreLayout(targetNodes, targetEdges, {
+            direction: layoutMode as 'TB' | 'LR' | 'BT' | 'RL',
+          });
+          return res.nodes;
+        }
+      } catch (err) {
+        console.warn('Layout recalculation error, falling back to Dagre LR:', err);
+        try {
+          const fallback = getDagreLayout(targetNodes, targetEdges, {
+            direction: 'LR',
+          });
+          return fallback.nodes;
+        } catch {
+          return targetNodes;
+        }
+      }
+    },
+    []
+  );
+
   // Subtree Collapse/Expand Toggle Logic
   const handleToggleCollapse = useCallback(
-    (targetNodeId: string) => {
-      setNodes((currentNodes) => {
-        const targetNode = currentNodes.find((n) => n.id === targetNodeId);
-        if (!targetNode) return currentNodes;
+    async (targetNodeId: string) => {
+      const currentNodes = nodesRef.current;
+      const currentEdges = edgesRef.current;
+      const targetNode = currentNodes.find((n) => n.id === targetNodeId);
+      if (!targetNode) return;
 
-        const nextCollapsed = !targetNode.data?.collapsed;
+      const nextCollapsed = !targetNode.data?.collapsed;
 
-        // Traverse descendants using BFS
-        const descendants = new Set<string>();
+      // When collapsing: hide ALL descendants recursively
+      // When expanding: unhide descendants where parent chain is not collapsed
+      const descendantsToUpdate = new Set<string>();
+
+      if (nextCollapsed) {
+        // Collapsing: collect all descendants to hide
         const queue = [targetNodeId];
-
         while (queue.length > 0) {
           const parentId = queue.shift()!;
-          const childEdges = edgesRef.current.filter((e) => e.source === parentId);
+          const childEdges = currentEdges.filter((e) => e.source === parentId);
           for (const edge of childEdges) {
-            if (!descendants.has(edge.target)) {
-              descendants.add(edge.target);
+            if (!descendantsToUpdate.has(edge.target)) {
+              descendantsToUpdate.add(edge.target);
               queue.push(edge.target);
             }
           }
         }
-
-        return currentNodes.map((node) => {
-          if (node.id === targetNodeId) {
-            return {
-              ...node,
-              data: {
-                ...node.data,
-                collapsed: nextCollapsed,
-              },
-            };
+      } else {
+        // Expanding: unhide direct children and sub-branches if their direct parent is not collapsed
+        const nodeMap = new Map(currentNodes.map((n) => [n.id, n]));
+        const queue = [targetNodeId];
+        while (queue.length > 0) {
+          const parentId = queue.shift()!;
+          const parent = nodeMap.get(parentId);
+          if (parentId === targetNodeId || !parent?.data?.collapsed) {
+            const childEdges = currentEdges.filter((e) => e.source === parentId);
+            for (const edge of childEdges) {
+              if (!descendantsToUpdate.has(edge.target)) {
+                descendantsToUpdate.add(edge.target);
+                queue.push(edge.target);
+              }
+            }
           }
+        }
+      }
 
-          if (descendants.has(node.id)) {
-            return {
-              ...node,
-              data: {
-                ...node.data,
-                hidden: nextCollapsed,
-              },
-            };
-          }
+      const updatedNodes = currentNodes.map((node) => {
+        if (node.id === targetNodeId) {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              collapsed: nextCollapsed,
+            },
+          };
+        }
 
-          return node;
-        });
+        if (descendantsToUpdate.has(node.id)) {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              hidden: nextCollapsed,
+            },
+          };
+        }
+
+        return node;
       });
+
+      // Recalculate layout for visible nodes so remaining nodes pack tightly together
+      const layoutedNodes = await recalculateLayout(updatedNodes, currentEdges, currentLayoutRef.current);
+      setNodes(layoutedNodes);
+
+      // Smoothly frame the updated compact layout
+      setTimeout(() => {
+        fitView({ duration: 350, padding: 0.2 });
+      }, 50);
     },
-    [setNodes]
+    [recalculateLayout, setNodes, fitView]
   );
 
   // Quick Hierarchical Folding (L1, L2, Expand All, Collapse All)
   const handleFoldLevel = useCallback(
-    (level: number | 'all-expand' | 'all-collapse') => {
-      setNodes((currentNodes) => {
-        if (level === 'all-expand') {
-          return currentNodes.map((n) => ({
-            ...n,
-            data: { ...n.data, collapsed: false, hidden: false },
-          }));
-        }
+    async (level: number | 'all-expand' | 'all-collapse') => {
+      const currentNodes = nodesRef.current;
+      const currentEdges = edgesRef.current;
 
-        const currentEdges = edgesRef.current;
-        let root = currentNodes.find((n) => n.data?.isRoot);
-        if (!root && currentNodes.length > 0) {
-          const targetIds = new Set(currentEdges.map((e) => e.target));
-          root = currentNodes.find((n) => !targetIds.has(n.id)) || currentNodes[0];
-        }
+      let root = currentNodes.find((n) => n.data?.isRoot);
+      if (!root && currentNodes.length > 0) {
+        const targetIds = new Set(currentEdges.map((e) => e.target));
+        root = currentNodes.find((n) => !targetIds.has(n.id)) || currentNodes[0];
+      }
 
-        if (!root) return currentNodes;
+      if (!root) return;
 
-        if (level === 'all-collapse') {
-          return currentNodes.map((n) => ({
-            ...n,
-            data: {
-              ...n.data,
-              collapsed: n.id === root!.id,
-              hidden: n.id !== root!.id,
-            },
-          }));
-        }
+      let updatedNodes: MapMindNode[];
 
-        // Calculate node depth
+      if (level === 'all-expand') {
+        updatedNodes = currentNodes.map((n) => ({
+          ...n,
+          data: { ...n.data, collapsed: false, hidden: false },
+        }));
+      } else if (level === 'all-collapse') {
+        updatedNodes = currentNodes.map((n) => ({
+          ...n,
+          data: {
+            ...n.data,
+            collapsed: n.id === root!.id,
+            hidden: n.id !== root!.id,
+          },
+        }));
+      } else {
+        // Calculate node depth from root
         const depthMap = new Map<string, number>();
         const queue: { id: string; depth: number }[] = [{ id: root.id, depth: 0 }];
         depthMap.set(root.id, 0);
@@ -503,7 +571,7 @@ export function AppContent() {
 
         const targetLevel = typeof level === 'number' ? level : 1;
 
-        return currentNodes.map((n) => {
+        updatedNodes = currentNodes.map((n) => {
           const d = depthMap.get(n.id) ?? 1;
           const isHidden = d > targetLevel;
           const isCollapsed = d === targetLevel;
@@ -516,18 +584,27 @@ export function AppContent() {
             },
           };
         });
-      });
+      }
+
+      // Re-layout visible nodes so remaining nodes immediately come near each other
+      const layoutedNodes = await recalculateLayout(updatedNodes, currentEdges, currentLayoutRef.current);
+      setNodes(layoutedNodes);
 
       showNotification(
         level === 'all-expand'
           ? 'Expanded all branches'
           : level === 'all-collapse'
           ? 'Collapsed to root topic'
-          : `Folded to Level ${level}`,
+          : `Folded to Level ${level} (Compacted)`,
         'info'
       );
+
+      // Smoothly zoom and pan camera to fit the compacted mind map
+      setTimeout(() => {
+        fitView({ duration: 400, padding: 0.2 });
+      }, 50);
     },
-    [setNodes, showNotification]
+    [recalculateLayout, setNodes, showNotification, fitView]
   );
 
   // Update node label directly
@@ -653,9 +730,17 @@ export function AppContent() {
         type: 'smoothstep',
       };
 
-      // Unselect all other nodes and set new node
+      // Unselect all other nodes, ensure parent is uncollapsed, and append new node
       setNodes((nds) => [
-        ...nds.map((n) => ({ ...n, selected: false, data: { ...n.data, isEditing: false } })),
+        ...nds.map((n) => ({
+          ...n,
+          selected: false,
+          data: {
+            ...n.data,
+            isEditing: false,
+            collapsed: n.id === parentId ? false : n.data?.collapsed,
+          },
+        })),
         newNode,
       ]);
       setEdges((eds) => [...eds, newEdge]);
@@ -873,7 +958,25 @@ export function AppContent() {
 
       const activeId = selectedNodeIdRef.current;
 
-      // 0. Ctrl+K or Cmd+K -> Open Search Command Palette
+      // 0a. Ctrl+S or Ctrl+Shift+S -> Save / Save As
+      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S' || e.code === 'KeyS')) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleSave(true);
+        } else {
+          handleSave(false);
+        }
+        return;
+      }
+
+      // 0b. Ctrl+O -> Open file
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'o' || e.key === 'O' || e.code === 'KeyO')) {
+        e.preventDefault();
+        handleOpen();
+        return;
+      }
+
+      // 0c. Ctrl+K or Cmd+K -> Open Search Command Palette
       if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
         e.preventDefault();
         setIsSearchOpen((prev) => !prev);
@@ -1005,6 +1108,8 @@ export function AppContent() {
     handleNavigate,
     handleDeleteNode,
     handleToggleCollapse,
+    handleSave,
+    handleOpen,
     centerOnNode,
     fitView,
   ]);
@@ -1012,6 +1117,8 @@ export function AppContent() {
   // Apply Layout Engine (Dagre or ELK)
   const handleApplyLayout = useCallback(
     async (layoutType: LayoutDirection) => {
+      setCurrentLayout(layoutType);
+      currentLayoutRef.current = layoutType;
       setIsLayouting(true);
       try {
         if (layoutType === 'BALANCED_MINDMAP') {
@@ -1030,6 +1137,9 @@ export function AppContent() {
             'success'
           );
         }
+        setTimeout(() => {
+          fitView({ duration: 400, padding: 0.2 });
+        }, 50);
       } catch (err) {
         console.error('Layout failed:', err);
         showNotification('Layout calculation failed', 'error');
@@ -1037,7 +1147,7 @@ export function AppContent() {
         setIsLayouting(false);
       }
     },
-    [nodesWithChildCounts, edges, setNodes, setEdges, showNotification]
+    [nodesWithChildCounts, edges, setNodes, setEdges, fitView, showNotification]
   );
 
   // Toggle Node Lock / Pin in place
@@ -1126,6 +1236,7 @@ export function AppContent() {
             centerOnNode(nodeId, 300);
           }}
           onFoldLevel={handleFoldLevel}
+          onToggleCollapse={handleToggleCollapse}
         />
 
         <DiagramCanvas

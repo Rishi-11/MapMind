@@ -1,7 +1,6 @@
 User-agent: *
 Allow: /
 
-# Googlebot & Bingbot specific directives
 User-agent: Googlebot
 Allow: /
 

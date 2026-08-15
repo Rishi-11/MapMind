@@ -3,6 +3,7 @@ import {
   FilePlus,
   FolderOpen,
   Save,
+  FileDown,
   History,
   Download,
   Moon,
@@ -113,6 +114,14 @@ export const HeaderToolbar: React.FC<HeaderToolbarProps> = ({
           >
             <Save className="w-3.5 h-3.5" />
             <span>{isSaving ? '...' : 'Save'}</span>
+          </button>
+          <button
+            onClick={() => onSave(true)}
+            disabled={isSaving}
+            title="Save As New File (Ctrl+Shift+S)"
+            className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 hover:shadow-2xs transition-all cursor-pointer"
+          >
+            <FileDown className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={onOpenCleanBoard}

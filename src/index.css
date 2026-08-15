@@ -13,6 +13,17 @@
 }
 
 /* React Flow custom style overrides for MapMind */
+.react-flow__node {
+  transition: transform 0.35s cubic-bezier(0.25, 1, 0.5, 1);
+  will-change: transform;
+}
+
+.react-flow__node.dragging,
+.react-flow__node.selectable:active,
+.react-flow__node:active {
+  transition: none !important;
+}
+
 .react-flow__handle {
   transition: all 0.15s ease-in-out;
   border-radius: 9999px;

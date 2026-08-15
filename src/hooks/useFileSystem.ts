@@ -68,15 +68,20 @@ export function useFileSystem(
   // Keyboard shortcut listener for Ctrl+S, Ctrl+Shift+S, Ctrl+O
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      const isS = e.key === 's' || e.key === 'S' || e.code === 'KeyS';
+      const isO = e.key === 'o' || e.key === 'O' || e.code === 'KeyO';
+
+      if ((e.ctrlKey || e.metaKey) && isS) {
         e.preventDefault();
+        e.stopPropagation();
         if (e.shiftKey) {
-          handleSave(true); // Save As
+          handleSave(true); // Force Save As file picker modal
         } else {
-          handleSave(false); // Silent Save or Initial Save
+          handleSave(false); // Silent Save to active file or prompt if new
         }
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') {
+      } else if ((e.ctrlKey || e.metaKey) && isO) {
         e.preventDefault();
+        e.stopPropagation();
         handleOpen();
       }
     };
