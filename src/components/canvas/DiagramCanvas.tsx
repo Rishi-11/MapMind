@@ -34,6 +34,7 @@ interface DiagramCanvasProps {
   onStartEditingNode: (nodeId: string) => void;
   onStopEditingNode: (nodeId: string) => void;
   onSelectNode: (node: MapMindNode | null) => void;
+  onDeleteNode?: (nodeId: string) => void;
 }
 
 const nodeTypes: NodeTypes = {
@@ -57,6 +58,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   onStartEditingNode,
   onStopEditingNode,
   onSelectNode,
+  onDeleteNode,
 }) => {
   // Augment node data with handlers, sketch mode, and locking constraints
   const augmentedNodes = useMemo(() => {
@@ -192,6 +194,12 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         onConnect={onConnect}
         onNodeClick={(_event, node) => onSelectNode(node)}
         onPaneClick={() => onSelectNode(null)}
+        deleteKeyCode={null}
+        onNodesDelete={(deleted) => {
+          if (deleted && deleted.length > 0 && onDeleteNode) {
+            onDeleteNode(deleted[0].id);
+          }
+        }}
         snapToGrid={settings.gridSnap}
         snapGrid={[settings.gridSize, settings.gridSize]}
         connectionLineType={ConnectionLineType.SmoothStep}

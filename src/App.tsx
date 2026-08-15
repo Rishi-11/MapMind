@@ -448,39 +448,65 @@ export function AppContent() {
     [setNodes]
   );
 
-  // Delete node and auto-select parent/sibling
+  // Delete node and auto-select its immediate direct parent
   const handleDeleteNode = useCallback(
     (nodeId: string) => {
       const currentNodes = nodesRef.current;
       const currentEdges = edgesRef.current;
 
-      const incoming = currentEdges.find((e) => e.target === nodeId);
-      const parentId = incoming ? incoming.source : null;
+      // Find immediate parent (incoming edge where this node is target, or reverse connection)
+      const incomingEdge = currentEdges.find((e) => e.target === nodeId);
+      const outgoingEdge = currentEdges.find((e) => e.source === nodeId);
+      const immediateParentId = incomingEdge
+        ? incomingEdge.source
+        : outgoingEdge
+        ? outgoingEdge.target
+        : null;
 
-      // Find next node to select
-      let nextSelectedId: string | null = null;
-      if (parentId) {
-        const siblings = currentEdges
-          .filter((e) => e.source === parentId && e.target !== nodeId)
-          .map((e) => e.target);
-        if (siblings.length > 0) {
-          nextSelectedId = siblings[0];
-        } else {
-          nextSelectedId = parentId;
+      // Find all descendant nodes to clean up recursively
+      const toDelete = new Set<string>([nodeId]);
+      const queue = [nodeId];
+      while (queue.length > 0) {
+        const curr = queue.shift()!;
+        const children = currentEdges.filter((e) => e.source === curr).map((e) => e.target);
+        for (const childId of children) {
+          if (!toDelete.has(childId)) {
+            toDelete.add(childId);
+            queue.push(childId);
+          }
         }
-      } else {
-        const remaining = currentNodes.filter((n) => n.id !== nodeId);
+      }
+
+      // Next selected target: strictly the immediate parent above this node
+      let nextSelectedId: string | null = immediateParentId;
+      if (!nextSelectedId) {
+        const remaining = currentNodes.filter((n) => !toDelete.has(n.id));
         if (remaining.length > 0) {
           nextSelectedId = remaining[0].id;
         }
       }
 
-      setNodes((nds) => nds.filter((n) => n.id !== nodeId));
-      setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId));
+      setNodes((nds) =>
+        nds
+          .filter((n) => !toDelete.has(n.id))
+          .map((n) => ({
+            ...n,
+            selected: n.id === nextSelectedId,
+            data: { ...n.data, isEditing: false },
+          }))
+      );
+      setEdges((eds) =>
+        eds.filter((e) => !toDelete.has(e.source) && !toDelete.has(e.target))
+      );
       setSelectedNodeId(nextSelectedId);
-      showNotification('Node deleted', 'info');
+
+      if (nextSelectedId) {
+        setTimeout(() => centerOnNode(nextSelectedId, 250), 30);
+      }
+
+      showNotification('Deleted node & selected parent', 'info');
     },
-    [setNodes, setEdges, showNotification]
+    [setNodes, setEdges, centerOnNode, showNotification]
   );
 
   // Add Child Node (Tab) with immediate edit mode
@@ -825,6 +851,19 @@ export function AppContent() {
         return;
       }
 
+      // 8. Direct Typing -> If user starts typing any alphanumeric letter while a node is selected, start editing immediately!
+      if (
+        e.key.length === 1 &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        e.key !== '?'
+      ) {
+        if (activeId) {
+          handleStartEditingNode(activeId);
+        }
+      }
+
       // 8. '?' -> Open Keyboard Shortcuts Guide
       if (e.key === '?' || (e.shiftKey && e.key === '/')) {
         e.preventDefault();
@@ -958,6 +997,7 @@ export function AppContent() {
           onStartEditingNode={handleStartEditingNode}
           onStopEditingNode={handleStopEditingNode}
           onSelectNode={(node) => setSelectedNodeId(node ? node.id : null)}
+          onDeleteNode={handleDeleteNode}
         />
 
         {/* Selected Node Properties Inspector */}
