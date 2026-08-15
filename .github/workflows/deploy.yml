@@ -11,7 +11,7 @@ permissions:
   pages: write
   id-token: write
 
-# Allow only one concurrent deployment, skipping runs queued between the run in-progress and latest queued.
+# Allow only one concurrent deployment
 concurrency:
   group: "pages"
   cancel-in-progress: false
@@ -23,7 +23,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Node.js
@@ -38,8 +38,10 @@ jobs:
       - name: Build static distribution
         run: npm run build
 
-      - name: Copy index.html to 404.html for SPA routing fallback
-        run: cp dist/index.html dist/404.html
+      - name: Copy index.html to 404.html & create .nojekyll
+        run: |
+          cp dist/index.html dist/404.html
+          touch dist/.nojekyll
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
