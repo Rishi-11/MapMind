@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  
+  body {
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+/* React Flow custom style overrides for MapMind */
+.react-flow__handle {
+  transition: all 0.15s ease-in-out;
+  border-radius: 9999px;
+}
+
+.react-flow__handle:hover {
+  transform: scale(1.3);
+}
+
+.react-flow__edge-path {
+  transition: stroke 0.2s ease, stroke-width 0.2s ease;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: #3b82f6 !important;
+  stroke-width: 2.5px !important;
+}
+
+.react-flow__controls-button {
+  border-bottom: 1px solid rgba(226, 232, 240, 0.8) !important;
+  background-color: transparent !important;
+  fill: #64748b !important;
+}
+
+.dark .react-flow__controls-button {
+  border-bottom: 1px solid rgba(51, 65, 85, 0.8) !important;
+  fill: #94a3b8 !important;
+}
+
+.react-flow__controls-button:hover {
+  background-color: rgba(241, 245, 249, 0.8) !important;
+}
+
+.dark .react-flow__controls-button:hover {
+  background-color: rgba(51, 65, 85, 0.8) !important;
+}
+
+/* Custom modern scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.7);
+}
