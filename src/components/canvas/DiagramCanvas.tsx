@@ -12,6 +12,7 @@ import {
   OnEdgesChange,
   NodeTypes,
   EdgeTypes,
+  useStore,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
@@ -60,7 +61,10 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   onSelectNode,
   onDeleteNode,
 }) => {
-  // Augment node data with handlers, sketch mode, and locking constraints
+  const zoom = useStore((s) => s.transform[2]);
+  const isLOD = zoom < 0.55;
+
+  // Augment node data with handlers, sketch mode, LOD, and locking constraints
   const augmentedNodes = useMemo(() => {
     return nodes.map((node) => ({
       ...node,
@@ -69,6 +73,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       data: {
         ...node.data,
         sketchMode: settings.sketchMode,
+        isLOD: node.data?.isLOD !== undefined ? node.data.isLOD : isLOD,
         onToggleCollapse,
         onToggleLock,
         onUpdateLabel: onUpdateNodeLabel,
@@ -85,6 +90,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   }, [
     nodes,
     settings.sketchMode,
+    isLOD,
     onToggleCollapse,
     onToggleLock,
     onUpdateNodeLabel,
@@ -143,14 +149,22 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
           }
         }
 
+        const isDimmed = Boolean(sourceNode?.data?.isDimmed || targetNode?.data?.isDimmed);
+
         return {
           ...edge,
           sourceHandle,
           targetHandle,
           type: 'smoothstep',
           style: {
-            strokeWidth: settings.sketchMode ? 2 : 1.8,
-            stroke: settings.sketchMode ? '#475569' : '#94a3b8',
+            strokeWidth: settings.sketchMode ? 2 : isDimmed ? 1 : 1.8,
+            stroke: isDimmed
+              ? '#cbd5e1'
+              : settings.sketchMode
+              ? '#475569'
+              : '#94a3b8',
+            opacity: isDimmed ? 0.12 : 1,
+            transition: 'opacity 0.3s ease, stroke 0.3s ease',
             ...edge.style,
           },
         };

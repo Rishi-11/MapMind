@@ -16,11 +16,17 @@ import { KeyboardShortcutsModal } from '@/components/ui/KeyboardShortcutsModal';
 import { CanvasThemeModal } from '@/components/ui/CanvasThemeModal';
 import { CleanBoardModal } from '@/components/ui/CleanBoardModal';
 import { AiChatMindMapModal } from '@/components/ui/AiChatMindMapModal';
+import { PresentationMode } from '@/components/ui/PresentationMode';
+import { OutlineNavigatorDrawer } from '@/components/ui/OutlineNavigatorDrawer';
+import { Breadcrumbs } from '@/components/ui/Breadcrumbs';
+import { SearchModal } from '@/components/ui/SearchModal';
+import { FloatingActionDock } from '@/components/ui/FloatingActionDock';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useAutoSaveHistory } from '@/hooks/useAutoSaveHistory';
 import { useFileSystem } from '@/hooks/useFileSystem';
 import { getDagreLayout } from '@/lib/layouts/dagreLayout';
 import { getElkLayout } from '@/lib/layouts/elkLayout';
+import { computeBranchMetrics, computeSpotlightSet } from '@/lib/branchUtils';
 
 // Initial Starter Mind Map Template
 const INITIAL_NODES: MapMindNode[] = [
@@ -160,6 +166,10 @@ export function AppContent() {
   const [isCanvasThemeOpen, setIsCanvasThemeOpen] = useState(false);
   const [isCleanBoardOpen, setIsCleanBoardOpen] = useState(false);
   const [isAiImportOpen, setIsAiImportOpen] = useState(false);
+  const [isPresentationOpen, setIsPresentationOpen] = useState(false);
+  const [isOutlineOpen, setIsOutlineOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isSpotlightActive, setIsSpotlightActive] = useState(false);
   const [isTimeMachineOpen, setIsTimeMachineOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const [isLayouting, setIsLayouting] = useState(false);
@@ -204,22 +214,38 @@ export function AppContent() {
     }
   }, [settings.theme]);
 
-  // Dynamic child count calculation for every node
+  // Dynamic metrics: Branch Color Inheritance, Recursive Descendant Count, and Subtree Spotlight Dimming
   const nodesWithChildCounts = useMemo(() => {
-    const childCountMap = new Map<string, number>();
-    edges.forEach((edge) => {
-      childCountMap.set(edge.source, (childCountMap.get(edge.source) || 0) + 1);
-    });
+    const metrics = computeBranchMetrics(nodes, edges);
+    const spotlightSet = isSpotlightActive
+      ? computeSpotlightSet(selectedNodeId, nodes, edges)
+      : null;
 
-    return nodes.map((node) => ({
-      ...node,
-      selected: node.id === selectedNodeId,
-      data: {
-        ...node.data,
-        childCount: childCountMap.get(node.id) || 0,
-      },
-    }));
-  }, [nodes, edges, selectedNodeId]);
+    return nodes.map((node) => {
+      const childCount = metrics.childrenMap.get(node.id)?.length || 0;
+      const descendantCount = metrics.descendantCountMap.get(node.id) || 0;
+      const inheritedColor = metrics.inheritedColorMap.get(node.id);
+
+      // Node color: explicit user color > inherited branch pillar color > fallback 'blue'
+      const colorTheme = (node.data?.colorTheme || inheritedColor || 'blue');
+
+      const isDimmed = Boolean(isSpotlightActive && spotlightSet && !spotlightSet.has(node.id));
+      const isSpotlightTarget = Boolean(isSpotlightActive && node.id === selectedNodeId);
+
+      return {
+        ...node,
+        selected: node.id === selectedNodeId,
+        data: {
+          ...node.data,
+          colorTheme,
+          childCount,
+          descendantCount,
+          isDimmed,
+          isSpotlightTarget,
+        },
+      };
+    });
+  }, [nodes, edges, selectedNodeId, isSpotlightActive]);
 
   const selectedNode = useMemo(() => {
     return nodes.find((n) => n.id === selectedNodeId) || null;
@@ -228,11 +254,11 @@ export function AppContent() {
   const { setCenter, getZoom, fitView } = useReactFlow();
 
   const centerOnNode = useCallback(
-    (nodeId: string, duration = 300) => {
+    (nodeId: string, duration = 300, customZoom?: number) => {
       const target = nodesRef.current.find((n) => n.id === nodeId);
       if (target) {
         const currentZoom = getZoom();
-        const zoom = Math.max(currentZoom, 1.0);
+        const zoom = customZoom !== undefined ? customZoom : Math.max(currentZoom, 1.0);
         setCenter(target.position.x + 115, target.position.y + 48, { zoom, duration });
       }
     },
@@ -426,6 +452,82 @@ export function AppContent() {
       });
     },
     [setNodes]
+  );
+
+  // Quick Hierarchical Folding (L1, L2, Expand All, Collapse All)
+  const handleFoldLevel = useCallback(
+    (level: number | 'all-expand' | 'all-collapse') => {
+      setNodes((currentNodes) => {
+        if (level === 'all-expand') {
+          return currentNodes.map((n) => ({
+            ...n,
+            data: { ...n.data, collapsed: false, hidden: false },
+          }));
+        }
+
+        const currentEdges = edgesRef.current;
+        let root = currentNodes.find((n) => n.data?.isRoot);
+        if (!root && currentNodes.length > 0) {
+          const targetIds = new Set(currentEdges.map((e) => e.target));
+          root = currentNodes.find((n) => !targetIds.has(n.id)) || currentNodes[0];
+        }
+
+        if (!root) return currentNodes;
+
+        if (level === 'all-collapse') {
+          return currentNodes.map((n) => ({
+            ...n,
+            data: {
+              ...n.data,
+              collapsed: n.id === root!.id,
+              hidden: n.id !== root!.id,
+            },
+          }));
+        }
+
+        // Calculate node depth
+        const depthMap = new Map<string, number>();
+        const queue: { id: string; depth: number }[] = [{ id: root.id, depth: 0 }];
+        depthMap.set(root.id, 0);
+
+        while (queue.length > 0) {
+          const { id, depth } = queue.shift()!;
+          const children = currentEdges.filter((e) => e.source === id).map((e) => e.target);
+          for (const childId of children) {
+            if (!depthMap.has(childId)) {
+              depthMap.set(childId, depth + 1);
+              queue.push({ id: childId, depth: depth + 1 });
+            }
+          }
+        }
+
+        const targetLevel = typeof level === 'number' ? level : 1;
+
+        return currentNodes.map((n) => {
+          const d = depthMap.get(n.id) ?? 1;
+          const isHidden = d > targetLevel;
+          const isCollapsed = d === targetLevel;
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              hidden: isHidden,
+              collapsed: isCollapsed,
+            },
+          };
+        });
+      });
+
+      showNotification(
+        level === 'all-expand'
+          ? 'Expanded all branches'
+          : level === 'all-collapse'
+          ? 'Collapsed to root topic'
+          : `Folded to Level ${level}`,
+        'info'
+      );
+    },
+    [setNodes, showNotification]
   );
 
   // Update node label directly
@@ -771,6 +873,13 @@ export function AppContent() {
 
       const activeId = selectedNodeIdRef.current;
 
+      // 0. Ctrl+K or Cmd+K -> Open Search Command Palette
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setIsSearchOpen((prev) => !prev);
+        return;
+      }
+
       // 1. Tab -> Add Child Node
       if (e.key === 'Tab') {
         e.preventDefault();
@@ -800,13 +909,14 @@ export function AppContent() {
         return;
       }
 
-      // 4. 'f' -> Center / Focus Selected Node; 'Shift+F' -> Fit View
+      // 4. 'f' -> Center & Toggle Subtree Spotlight Focus; 'Shift+F' -> Fit View
       if (e.key === 'f' || e.key === 'F') {
         e.preventDefault();
         if (e.shiftKey) {
           fitView({ duration: 400 });
         } else if (activeId) {
           centerOnNode(activeId, 400);
+          setIsSpotlightActive((prev) => !prev);
         }
         return;
       }
@@ -864,7 +974,21 @@ export function AppContent() {
         }
       }
 
-      // 8. '?' -> Open Keyboard Shortcuts Guide
+      // 8. F5 or 'p' / 'P' -> Start Presentation Tour
+      if (e.key === 'F5' || e.key === 'p' || e.key === 'P') {
+        e.preventDefault();
+        setIsPresentationOpen((prev) => !prev);
+        return;
+      }
+
+      // 9. 'o' / 'O' -> Toggle Outline Navigator
+      if (e.key === 'o' || e.key === 'O') {
+        e.preventDefault();
+        setIsOutlineOpen((prev) => !prev);
+        return;
+      }
+
+      // 10. '?' -> Open Keyboard Shortcuts Guide
       if (e.key === '?' || (e.shiftKey && e.key === '/')) {
         e.preventDefault();
         setIsShortcutsOpen((prev) => !prev);
@@ -958,30 +1082,52 @@ export function AppContent() {
         onOpen={handleOpen}
         onSave={(forceSaveAs) => handleSave(forceSaveAs)}
         onOpenCleanBoard={() => setIsCleanBoardOpen(true)}
-        onOpenAiImport={() => setIsAiImportOpen(true)}
-        onAddNode={handleAddNode}
-        onApplyLayout={handleApplyLayout}
-        isLayouting={isLayouting}
-        settings={settings}
-        onToggleSketchMode={() =>
-          setSettings((s) => ({ ...s, sketchMode: !s.sketchMode }))
-        }
+        onOpenSearch={() => setIsSearchOpen(true)}
+        onToggleOutline={() => setIsOutlineOpen((prev) => !prev)}
+        isOutlineOpen={isOutlineOpen}
+        onFoldLevel={handleFoldLevel}
         onToggleTheme={() =>
           setSettings((s) => ({
             ...s,
             theme: s.theme === 'dark' ? 'light' : 'dark',
           }))
         }
-        onOpenCanvasTheme={() => setIsCanvasThemeOpen(true)}
+        isDarkTheme={settings.theme === 'dark'}
         onOpenTimeMachine={() => setIsTimeMachineOpen(true)}
         onOpenExport={() => setIsExportOpen(true)}
-        onOpenShortcuts={() => setIsShortcutsOpen(true)}
         snapshotCount={snapshots.length}
         secondsUntilNextSave={secondsUntilNextSave}
       />
 
       {/* Main Diagramming Canvas */}
       <main className="flex-1 relative overflow-hidden">
+        {/* Dynamic Root-to-Leaf Breadcrumbs Bar */}
+        <Breadcrumbs
+          selectedNodeId={selectedNodeId}
+          nodes={nodes}
+          edges={edges}
+          onSelectNode={(nodeId) => {
+            setSelectedNodeId(nodeId);
+            centerOnNode(nodeId, 300);
+          }}
+          isSpotlightActive={isSpotlightActive}
+          onToggleSpotlight={() => setIsSpotlightActive((prev) => !prev)}
+        />
+
+        {/* Outline Navigator & Search Drawer */}
+        <OutlineNavigatorDrawer
+          isOpen={isOutlineOpen}
+          onClose={() => setIsOutlineOpen(false)}
+          nodes={nodes}
+          edges={edges}
+          selectedNodeId={selectedNodeId}
+          onSelectNode={(nodeId) => {
+            setSelectedNodeId(nodeId);
+            centerOnNode(nodeId, 300);
+          }}
+          onFoldLevel={handleFoldLevel}
+        />
+
         <DiagramCanvas
           nodes={nodesWithChildCounts}
           edges={edges}
@@ -1000,6 +1146,23 @@ export function AppContent() {
           onDeleteNode={handleDeleteNode}
         />
 
+        {/* Modern Floating Action Dock */}
+        <FloatingActionDock
+          onAddNode={handleAddNode}
+          onOpenAiImport={() => setIsAiImportOpen(true)}
+          onOpenPresentation={() => setIsPresentationOpen(true)}
+          isSpotlightActive={isSpotlightActive}
+          onToggleSpotlight={() => setIsSpotlightActive((prev) => !prev)}
+          sketchMode={settings.sketchMode}
+          onToggleSketchMode={() =>
+            setSettings((s) => ({ ...s, sketchMode: !s.sketchMode }))
+          }
+          onApplyLayout={handleApplyLayout}
+          isLayouting={isLayouting}
+          onOpenCanvasTheme={() => setIsCanvasThemeOpen(true)}
+          onOpenShortcuts={() => setIsShortcutsOpen(true)}
+        />
+
         {/* Selected Node Properties Inspector */}
         <NodeInspector
           selectedNode={selectedNode}
@@ -1007,25 +1170,29 @@ export function AppContent() {
           onDeleteNode={handleDeleteNode}
           onClose={() => setSelectedNodeId(null)}
         />
-
-        {/* Floating Quick Keyboard Hint Pill */}
-        <div className="absolute bottom-4 left-4 z-20 hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-md border border-slate-200/80 dark:border-slate-700/80 text-[11px] text-slate-600 dark:text-slate-300 shadow-sm">
-          <span><kbd className="font-mono font-bold text-blue-600 dark:text-blue-400">Tab</kbd> Child</span>
-          <span>•</span>
-          <span><kbd className="font-mono font-bold text-emerald-600 dark:text-emerald-400">Enter</kbd> Sibling</span>
-          <span>•</span>
-          <span><kbd className="font-mono font-bold text-purple-600 dark:text-purple-400">Space</kbd> Edit</span>
-          <span>•</span>
-          <span><kbd className="font-mono font-bold text-amber-600 dark:text-amber-400">Arrows</kbd> Move</span>
-          <span>•</span>
-          <button
-            onClick={() => setIsShortcutsOpen(true)}
-            className="font-bold underline text-blue-600 dark:text-blue-400 hover:opacity-80 ml-1"
-          >
-            ? Help
-          </button>
-        </div>
       </main>
+
+      {/* Ctrl+K Fuzzy Search Command Palette */}
+      <SearchModal
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+        nodes={nodes}
+        edges={edges}
+        onSelectNode={(nodeId) => {
+          setSelectedNodeId(nodeId);
+          centerOnNode(nodeId, 450, 1.25);
+        }}
+      />
+
+      {/* Presentation Tour Mode (Step-by-step presentation & zoom tour) */}
+      <PresentationMode
+        isOpen={isPresentationOpen}
+        onClose={() => setIsPresentationOpen(false)}
+        nodes={nodes}
+        edges={edges}
+        onFocusNode={(nodeId, zoom) => centerOnNode(nodeId, 450, zoom)}
+        onFitView={() => fitView({ duration: 500 })}
+      />
 
       {/* AI Chatbot to Mind Map Generator Modal */}
       <ErrorBoundary fallbackTitle="AI Mind Map Generator">

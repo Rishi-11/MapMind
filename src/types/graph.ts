@@ -26,6 +26,10 @@ export interface CustomNodeData extends Record<string, unknown> {
   tags?: string[];
   isRoot?: boolean;
   childCount?: number;
+  descendantCount?: number;
+  isDimmed?: boolean;
+  isSpotlightTarget?: boolean;
+  isLOD?: boolean;
   shape?: NodeShape;
   cardStyle?: NodeCardStyle;
   notes?: string;

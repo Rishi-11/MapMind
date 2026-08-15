@@ -170,6 +170,26 @@ export const CustomNode = memo(({ id, data, selected }: CustomNodeProps) => {
     if (isEditing && inputRef.current) {
       inputRef.current.focus();
       inputRef.current.select();
+
+      // Multi-stage RAF and timeout to guarantee focus is not stolen by React Flow canvas
+      const raf = requestAnimationFrame(() => {
+        if (inputRef.current) {
+          inputRef.current.focus();
+          inputRef.current.select();
+        }
+      });
+
+      const timer = setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.focus();
+          inputRef.current.select();
+        }
+      }, 30);
+
+      return () => {
+        cancelAnimationFrame(raf);
+        clearTimeout(timer);
+      };
     }
   }, [isEditing]);
 
@@ -229,8 +249,50 @@ export const CustomNode = memo(({ id, data, selected }: CustomNodeProps) => {
     data.onSelect?.(id);
   };
 
+  const isDimmed = Boolean(data.isDimmed);
+  const isSpotlightTarget = Boolean(data.isSpotlightTarget);
+  const isLOD = Boolean(data.isLOD);
+  const descendantCount = typeof data.descendantCount === 'number' ? data.descendantCount : childCount;
+
   if (isHidden) {
     return null;
+  }
+
+  // 0. High-Performance Level of Detail (LOD) Render (< 0.55x zoom)
+  if (isLOD && !isEditing) {
+    return (
+      <div
+        ref={containerRef}
+        onClick={handleNodeClick}
+        className={`min-w-[130px] max-w-[240px] px-3 py-2 rounded-xl ${theme.bg} ${theme.border} border-2 shadow-sm flex items-center justify-between gap-2 select-none transition-all duration-200 ${
+          isDimmed ? 'opacity-15 grayscale pointer-events-none' : 'opacity-100'
+        } ${
+          selected
+            ? 'ring-3 ring-blue-500 scale-105 z-20'
+            : isSpotlightTarget
+            ? 'ring-3 ring-indigo-500 shadow-md z-20'
+            : ''
+        }`}
+      >
+        <Handle type="target" position={Position.Left} id="target-left" className="!w-2 !h-2 opacity-0" />
+        <Handle type="source" position={Position.Right} id="source-right" className="!w-2 !h-2 opacity-0" />
+        <Handle type="target" position={Position.Top} id="target-top" className="!w-2 !h-2 opacity-0" />
+        <Handle type="source" position={Position.Bottom} id="source-bottom" className="!w-2 !h-2 opacity-0" />
+
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className={`w-2 h-2 rounded-full ${theme.accent} shrink-0`} />
+          <span className={`text-xs font-bold truncate ${theme.text}`}>
+            {data.label || 'Untitled'}
+          </span>
+        </div>
+
+        {isCollapsed && (descendantCount > 0 || childCount > 0) && (
+          <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-amber-500 text-white shrink-0">
+            +{descendantCount || childCount}
+          </span>
+        )}
+      </div>
+    );
   }
 
   // 1. Shape Geometry Computation
@@ -283,10 +345,14 @@ export const CustomNode = memo(({ id, data, selected }: CustomNodeProps) => {
           ? 'p-3 font-sketch text-lg'
           : `${shapeClass} ${styleClass} ${paddingClass}`
       } ${
+        isDimmed ? 'opacity-15 grayscale filter contrast-50 pointer-events-none' : 'opacity-100'
+      } ${
         selected && !isSketch
           ? cardStyle === 'bold'
             ? 'ring-4 ring-blue-600 ring-offset-3 dark:ring-offset-slate-950 scale-[1.03] z-30'
             : 'ring-4 ring-blue-500/90 ring-offset-3 dark:ring-offset-slate-950 shadow-2xl scale-[1.03] z-30'
+          : isSpotlightTarget && !isSketch
+          ? 'ring-3 ring-indigo-500 shadow-[0_0_25px_rgba(99,102,241,0.4)] z-20'
           : 'hover:scale-[1.01]'
       } ${isLocked ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}`}
       onDoubleClick={(e) => {
@@ -420,20 +486,24 @@ export const CustomNode = memo(({ id, data, selected }: CustomNodeProps) => {
               <Plus className="w-3.5 h-3.5" />
             </button>
 
-            {childCount > 0 && (
+            {(descendantCount > 0 || childCount > 0) && (
               <button
                 onClick={handleToggle}
-                title={isCollapsed ? `Expand ${childCount} children` : 'Collapse children'}
-                className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-bold transition-colors ${
+                title={
                   isCollapsed
-                    ? 'bg-amber-500 text-white shadow-xs'
+                    ? `Expand ${descendantCount > 0 ? descendantCount : childCount} sub-nodes`
+                    : 'Collapse branch'
+                }
+                className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold transition-all ${
+                  isCollapsed
+                    ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-xs scale-105'
                     : 'bg-slate-200/80 dark:bg-slate-700/80 text-slate-800 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-600'
                 }`}
               >
                 {isCollapsed ? (
                   <>
                     <Plus className="w-3 h-3" />
-                    <span>{childCount}</span>
+                    <span>+{descendantCount > 0 ? descendantCount : childCount}</span>
                   </>
                 ) : (
                   <Minus className="w-3 h-3" />
@@ -447,9 +517,14 @@ export const CustomNode = memo(({ id, data, selected }: CustomNodeProps) => {
         {isEditing ? (
           <input
             ref={inputRef}
+            autoFocus
             type="text"
             value={labelValue}
             onChange={(e) => setLabelValue(e.target.value)}
+            onFocus={(e) => {
+              e.target.select();
+            }}
+            onClick={(e) => e.stopPropagation()}
             onBlur={() => handleFinishEditing('none')}
             onKeyDown={handleKeyDown}
             className="w-full bg-white dark:bg-slate-900 border-2 border-blue-500 rounded-lg px-2.5 py-1 text-[15px] font-bold text-slate-950 dark:text-slate-50 outline-none shadow-sm"

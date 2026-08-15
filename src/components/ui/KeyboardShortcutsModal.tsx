@@ -28,11 +28,21 @@ const SHORTCUT_GROUPS = [
     ],
   },
   {
+    category: 'Large-Scale Graph & Presentation Navigation',
+    items: [
+      { key: 'Ctrl + K (or Cmd + K)', desc: 'Fuzzy Search Command Palette to find and fly to any node' },
+      { key: 'f', desc: 'Toggle Subtree Spotlight Focus (dim unrelated branches)' },
+      { key: 'Shift + F', desc: 'Fit full whiteboard in view' },
+      { key: 'F5 or p', desc: 'Start Step-by-Step Presentation Tour mode' },
+      { key: 'o', desc: 'Toggle Outline & Branch Tree Navigator' },
+      { key: 'Space / → (in tour)', desc: 'Advance to next slide / topic in presentation' },
+      { key: '← (in tour)', desc: 'Go back to previous slide in presentation' },
+    ],
+  },
+  {
     category: 'Node Actions & Whiteboard Operations',
     items: [
-      { key: 'Delete / Backspace', desc: 'Delete node and select parent node' },
-      { key: 'f', desc: 'Center & Focus view on currently selected node' },
-      { key: 'Shift + F', desc: 'Fit full whiteboard in view' },
+      { key: 'Delete / Backspace', desc: 'Delete node and select its direct parent' },
       { key: 'c or /', desc: 'Collapse / Expand subtree of selected node' },
       { key: 'Ctrl + S', desc: 'Silent Save to file (retains handle)' },
       { key: 'Ctrl + Shift + S', desc: 'Save As new diagram file' },
