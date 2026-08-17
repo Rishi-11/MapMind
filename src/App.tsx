@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef, lazy, Suspense } from 'react';
 import {
   useNodesState,
   useEdgesState,
@@ -9,19 +9,21 @@ import {
 import { MapMindNode, MapMindEdge, CanvasSettings, LayoutDirection, LayoutDensity } from '@/types/graph';
 import { DiagramCanvas } from '@/components/canvas/DiagramCanvas';
 import { HeaderToolbar } from '@/components/ui/HeaderToolbar';
-import { ExportMenu } from '@/components/ui/ExportMenu';
-import { TimeMachineModal } from '@/components/ui/TimeMachineModal';
 import { NodeInspector } from '@/components/ui/NodeInspector';
-import { KeyboardShortcutsModal } from '@/components/ui/KeyboardShortcutsModal';
-import { CanvasThemeModal } from '@/components/ui/CanvasThemeModal';
-import { CleanBoardModal } from '@/components/ui/CleanBoardModal';
-import { AiChatMindMapModal } from '@/components/ui/AiChatMindMapModal';
-import { PresentationMode } from '@/components/ui/PresentationMode';
-import { OutlineNavigatorDrawer } from '@/components/ui/OutlineNavigatorDrawer';
 import { Breadcrumbs } from '@/components/ui/Breadcrumbs';
-import { SearchModal } from '@/components/ui/SearchModal';
 import { FloatingActionDock } from '@/components/ui/FloatingActionDock';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+
+// 🚀 Lazy-Loaded Heavy Modals & Drawers (Fetched on demand for instant initial load)
+const ExportMenu = lazy(() => import('@/components/ui/ExportMenu').then((m) => ({ default: m.ExportMenu })));
+const TimeMachineModal = lazy(() => import('@/components/ui/TimeMachineModal').then((m) => ({ default: m.TimeMachineModal })));
+const KeyboardShortcutsModal = lazy(() => import('@/components/ui/KeyboardShortcutsModal').then((m) => ({ default: m.KeyboardShortcutsModal })));
+const CanvasThemeModal = lazy(() => import('@/components/ui/CanvasThemeModal').then((m) => ({ default: m.CanvasThemeModal })));
+const CleanBoardModal = lazy(() => import('@/components/ui/CleanBoardModal').then((m) => ({ default: m.CleanBoardModal })));
+const AiChatMindMapModal = lazy(() => import('@/components/ui/AiChatMindMapModal').then((m) => ({ default: m.AiChatMindMapModal })));
+const PresentationMode = lazy(() => import('@/components/ui/PresentationMode').then((m) => ({ default: m.PresentationMode })));
+const OutlineNavigatorDrawer = lazy(() => import('@/components/ui/OutlineNavigatorDrawer').then((m) => ({ default: m.OutlineNavigatorDrawer })));
+const SearchModal = lazy(() => import('@/components/ui/SearchModal').then((m) => ({ default: m.SearchModal })));
 import { useAutoSaveHistory } from '@/hooks/useAutoSaveHistory';
 import { useFileSystem } from '@/hooks/useFileSystem';
 import { getDagreLayout } from '@/lib/layouts/dagreLayout';
@@ -1347,6 +1349,25 @@ export function AppContent() {
     [setNodes, showNotification]
   );
 
+  // ⚡ Prefetch common modal chunks on browser idle time after initial render
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const prefetch = () => {
+        import('@/components/ui/SearchModal');
+        import('@/components/ui/CanvasThemeModal');
+        import('@/components/ui/KeyboardShortcutsModal');
+        import('@/components/ui/ExportMenu');
+      };
+      if ('requestIdleCallback' in window) {
+        const handle = (window as any).requestIdleCallback(prefetch, { timeout: 3000 });
+        return () => (window as any).cancelIdleCallback?.(handle);
+      } else {
+        const timeout = setTimeout(prefetch, 2500);
+        return () => clearTimeout(timeout);
+      }
+    }
+  }, []);
+
   return (
     <div className="w-screen h-screen flex flex-col bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 overflow-hidden font-sans">
       {/* Top Header Toolbar */}
@@ -1397,21 +1418,25 @@ export function AppContent() {
           onToggleSpotlight={() => setIsSpotlightActive((prev) => !prev)}
         />
 
-        {/* Outline Navigator & Search Drawer */}
-        <OutlineNavigatorDrawer
-          isOpen={isOutlineOpen}
-          onClose={() => setIsOutlineOpen(false)}
-          nodes={nodes}
-          edges={edges}
-          selectedNodeId={selectedNodeId}
-          onSelectNode={(nodeId) => {
-            setSelectedNodeId(nodeId);
-            setSelectedEdgeId(null);
-            centerOnNode(nodeId, 300);
-          }}
-          onFoldLevel={handleFoldLevel}
-          onToggleCollapse={handleToggleCollapse}
-        />
+        {/* Outline Navigator & Search Drawer (Lazy Loaded) */}
+        {isOutlineOpen && (
+          <Suspense fallback={null}>
+            <OutlineNavigatorDrawer
+              isOpen={isOutlineOpen}
+              onClose={() => setIsOutlineOpen(false)}
+              nodes={nodes}
+              edges={edges}
+              selectedNodeId={selectedNodeId}
+              onSelectNode={(nodeId) => {
+                setSelectedNodeId(nodeId);
+                setSelectedEdgeId(null);
+                centerOnNode(nodeId, 300);
+              }}
+              onFoldLevel={handleFoldLevel}
+              onToggleCollapse={handleToggleCollapse}
+            />
+          </Suspense>
+        )}
 
         <DiagramCanvas
           nodes={nodesWithChildCounts}
@@ -1492,85 +1517,115 @@ export function AppContent() {
         />
       </main>
 
-      {/* Ctrl+K Fuzzy Search Command Palette */}
-      <SearchModal
-        isOpen={isSearchOpen}
-        onClose={() => setIsSearchOpen(false)}
-        nodes={nodes}
-        edges={edges}
-        onSelectNode={(nodeId) => {
-          setSelectedNodeId(nodeId);
-          centerOnNode(nodeId, 450, 1.25);
-        }}
-      />
+      {/* Ctrl+K Fuzzy Search Command Palette (Lazy Loaded) */}
+      {isSearchOpen && (
+        <Suspense fallback={null}>
+          <SearchModal
+            isOpen={isSearchOpen}
+            onClose={() => setIsSearchOpen(false)}
+            nodes={nodes}
+            edges={edges}
+            onSelectNode={(nodeId) => {
+              setSelectedNodeId(nodeId);
+              centerOnNode(nodeId, 450, 1.25);
+            }}
+          />
+        </Suspense>
+      )}
 
-      {/* Presentation Tour Mode (Step-by-step presentation & zoom tour) */}
-      <PresentationMode
-        isOpen={isPresentationOpen}
-        onClose={() => setIsPresentationOpen(false)}
-        nodes={nodes}
-        edges={edges}
-        onFocusNode={(nodeId, zoom) => centerOnNode(nodeId, 450, zoom)}
-        onFitView={() => fitView({ duration: 500 })}
-      />
+      {/* Presentation Tour Mode (Lazy Loaded) */}
+      {isPresentationOpen && (
+        <Suspense fallback={null}>
+          <PresentationMode
+            isOpen={isPresentationOpen}
+            onClose={() => setIsPresentationOpen(false)}
+            nodes={nodes}
+            edges={edges}
+            onFocusNode={(nodeId, zoom) => centerOnNode(nodeId, 450, zoom)}
+            onFitView={() => fitView({ duration: 500 })}
+          />
+        </Suspense>
+      )}
 
-      {/* AI Chatbot to Mind Map Generator Modal */}
-      <ErrorBoundary fallbackTitle="AI Mind Map Generator">
-        <AiChatMindMapModal
-          isOpen={isAiImportOpen}
-          onClose={() => setIsAiImportOpen(false)}
-          selectedNodeId={selectedNodeId}
-          currentNodes={nodes}
-          currentEdges={edges}
-          onApplyMindMap={handleApplyAiMindMap}
-          onNotify={showNotification}
-        />
-      </ErrorBoundary>
+      {/* AI Chatbot to Mind Map Generator Modal (Lazy Loaded) */}
+      {isAiImportOpen && (
+        <Suspense fallback={null}>
+          <ErrorBoundary fallbackTitle="AI Mind Map Generator">
+            <AiChatMindMapModal
+              isOpen={isAiImportOpen}
+              onClose={() => setIsAiImportOpen(false)}
+              selectedNodeId={selectedNodeId}
+              currentNodes={nodes}
+              currentEdges={edges}
+              onApplyMindMap={handleApplyAiMindMap}
+              onNotify={showNotification}
+            />
+          </ErrorBoundary>
+        </Suspense>
+      )}
 
-      {/* Clean Whiteboard Modal */}
-      <CleanBoardModal
-        isOpen={isCleanBoardOpen}
-        onClose={() => setIsCleanBoardOpen(false)}
-        onConfirmClean={handleCleanBoard}
-        nodeCount={nodes.length}
-      />
+      {/* Clean Whiteboard Modal (Lazy Loaded) */}
+      {isCleanBoardOpen && (
+        <Suspense fallback={null}>
+          <CleanBoardModal
+            isOpen={isCleanBoardOpen}
+            onClose={() => setIsCleanBoardOpen(false)}
+            onConfirmClean={handleCleanBoard}
+            nodeCount={nodes.length}
+          />
+        </Suspense>
+      )}
 
-      {/* Canvas Background & Mood Modal */}
-      <CanvasThemeModal
-        isOpen={isCanvasThemeOpen}
-        onClose={() => setIsCanvasThemeOpen(false)}
-        settings={settings}
-        onUpdateSettings={(updates) => setSettings((s) => ({ ...s, ...updates }))}
-      />
+      {/* Canvas Background & Mood Modal (Lazy Loaded) */}
+      {isCanvasThemeOpen && (
+        <Suspense fallback={null}>
+          <CanvasThemeModal
+            isOpen={isCanvasThemeOpen}
+            onClose={() => setIsCanvasThemeOpen(false)}
+            settings={settings}
+            onUpdateSettings={(updates) => setSettings((s) => ({ ...s, ...updates }))}
+          />
+        </Suspense>
+      )}
 
-      {/* Keyboard Shortcuts Modal */}
-      <KeyboardShortcutsModal
-        isOpen={isShortcutsOpen}
-        onClose={() => setIsShortcutsOpen(false)}
-      />
+      {/* Keyboard Shortcuts Modal (Lazy Loaded) */}
+      {isShortcutsOpen && (
+        <Suspense fallback={null}>
+          <KeyboardShortcutsModal
+            isOpen={isShortcutsOpen}
+            onClose={() => setIsShortcutsOpen(false)}
+          />
+        </Suspense>
+      )}
 
-      {/* Time Machine Modal */}
-      <TimeMachineModal
-        isOpen={isTimeMachineOpen}
-        onClose={() => setIsTimeMachineOpen(false)}
-        snapshots={snapshots}
-        onRestore={(snapshot) =>
-          handleRestoreState(snapshot.state.nodes, snapshot.state.edges)
-        }
-        onDeleteSnapshot={deleteSnapshot}
-        onClearHistory={clearHistory}
-        secondsUntilNextSave={secondsUntilNextSave}
-      />
+      {/* Time Machine Modal (Lazy Loaded) */}
+      {isTimeMachineOpen && (
+        <Suspense fallback={null}>
+          <TimeMachineModal
+            isOpen={isTimeMachineOpen}
+            onClose={() => setIsTimeMachineOpen(false)}
+            snapshots={snapshots}
+            onRestore={(snapshot) =>
+              handleRestoreState(snapshot.state.nodes, snapshot.state.edges)
+            }
+            onDeleteSnapshot={deleteSnapshot}
+            onClearHistory={clearHistory}
+            secondsUntilNextSave={secondsUntilNextSave}
+          />
+        </Suspense>
+      )}
 
-      {/* Export Menu Modal */}
+      {/* Export Menu Modal (Lazy Loaded) */}
       {isExportOpen && (
-        <ExportMenu
-          onClose={() => setIsExportOpen(false)}
-          nodes={nodesWithChildCounts}
-          edges={edges}
-          settings={settings}
-          onNotify={showNotification}
-        />
+        <Suspense fallback={null}>
+          <ExportMenu
+            onClose={() => setIsExportOpen(false)}
+            nodes={nodesWithChildCounts}
+            edges={edges}
+            settings={settings}
+            onNotify={showNotification}
+          />
+        </Suspense>
       )}
 
       {/* Notification Toast */}

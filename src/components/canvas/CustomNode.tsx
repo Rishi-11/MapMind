@@ -2,7 +2,10 @@ import React, { memo, useState, useCallback, useRef, useEffect } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { Plus, Minus, Tag, Sparkles, Lock, Unlock, FileText } from 'lucide-react';
 import { CustomNodeData, NodeColorTheme, NodeShape, NodeCardStyle } from '@/types/graph';
-import { RoughNodeRenderer } from './RoughNodeRenderer';
+
+const RoughNodeRenderer = React.lazy(() =>
+  import('./RoughNodeRenderer').then((m) => ({ default: m.RoughNodeRenderer }))
+);
 
 const COLOR_CLASSES: Record<
   NodeColorTheme,
@@ -647,16 +650,18 @@ export const CustomNode = memo(({ id, data, selected }: CustomNodeProps) => {
         </div>
       )}
 
-      {/* RoughJS Sketch Mode Overlay */}
+      {/* RoughJS Sketch Mode Overlay (Lazy Loaded) */}
       {isSketch && (
-        <RoughNodeRenderer
-          width={dimensions.width}
-          height={dimensions.height}
-          colorTheme={colorTheme}
-          selected={selected}
-          shape={shape}
-          isRoot={isRoot}
-        />
+        <React.Suspense fallback={null}>
+          <RoughNodeRenderer
+            width={dimensions.width}
+            height={dimensions.height}
+            colorTheme={colorTheme}
+            selected={selected}
+            shape={shape}
+            isRoot={isRoot}
+          />
+        </React.Suspense>
       )}
 
       {/* DUAL DIRECTIONAL HANDLES */}

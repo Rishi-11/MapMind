@@ -1,8 +1,18 @@
-import ELK, { ElkNode, ElkExtendedEdge } from 'elkjs/lib/elk.bundled.js';
+import type { ElkNode, ElkExtendedEdge } from 'elkjs';
 import { MapMindNode, MapMindEdge, LayoutDensity } from '@/types/graph';
 import { getDagreLayout } from './dagreLayout';
 
-const elk = new ELK();
+// Cached singleton instance for dynamically loaded ELK
+let elkInstance: { layout: (graph: ElkNode) => Promise<ElkNode> } | null = null;
+
+async function getElk() {
+  if (!elkInstance) {
+    const ELKModule = await import('elkjs/lib/elk.bundled.js');
+    const ELK = ELKModule.default || ELKModule;
+    elkInstance = new ELK();
+  }
+  return elkInstance;
+}
 
 export interface ElkLayoutOptions {
   density?: LayoutDensity;
@@ -171,6 +181,7 @@ export async function getElkLayout(
         ],
       };
 
+      const elk = await getElk();
       const layoutResult = await elk.layout(sideGraph);
 
       if (layoutResult.children) {
@@ -295,6 +306,7 @@ export async function runStandardElkTree(
       })),
     };
 
+    const elk = await getElk();
     const layoutResult = await elk.layout(elkGraph);
     const positionMap = new Map<string, { x: number; y: number }>();
 
