@@ -284,7 +284,7 @@ function parseMarkdownOutlineToMindMap(text: string): ParsedMindMapResult {
       id: `e_${parent.id}_${item.id}`,
       source: parent.id,
       target: item.id,
-      type: 'smoothstep',
+      type: 'custom',
     });
 
     stack.push({
@@ -395,7 +395,7 @@ function parseMermaidMindmap(text: string): ParsedMindMapResult {
       id: `e_${parent.id}_${item.id}`,
       source: parent.id,
       target: item.id,
-      type: 'smoothstep',
+      type: 'custom',
     });
 
     stack.push({ depth: item.depth, id: item.id });
@@ -464,7 +464,7 @@ function parseJsonTree(json: any): ParsedMindMapResult {
         id: `e_${parentId}_${childId}`,
         source: parentId,
         target: childId,
-        type: 'smoothstep',
+        type: 'custom',
       });
 
       traverse(child, childId, depth + 1);

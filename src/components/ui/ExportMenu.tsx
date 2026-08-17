@@ -151,6 +151,10 @@ export const ExportMenu: React.FC<ExportMenuProps> = ({
       return false;
     }
 
+    if (node.getAttribute && node.getAttribute('data-export-ignore') === 'true') {
+      return false;
+    }
+
     return true;
   };
 

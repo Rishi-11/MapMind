@@ -6,7 +6,7 @@ import {
   ReactFlowProvider,
 } from '@xyflow/react';
 
-import { MapMindNode, MapMindEdge, CanvasSettings, LayoutDirection } from '@/types/graph';
+import { MapMindNode, MapMindEdge, CanvasSettings, LayoutDirection, LayoutDensity } from '@/types/graph';
 import { DiagramCanvas } from '@/components/canvas/DiagramCanvas';
 import { HeaderToolbar } from '@/components/ui/HeaderToolbar';
 import { ExportMenu } from '@/components/ui/ExportMenu';
@@ -27,6 +27,7 @@ import { useFileSystem } from '@/hooks/useFileSystem';
 import { getDagreLayout } from '@/lib/layouts/dagreLayout';
 import { getElkLayout } from '@/lib/layouts/elkLayout';
 import { computeBranchMetrics, computeSpotlightSet } from '@/lib/branchUtils';
+import { resolveNodeDragCollision } from '@/lib/collision/collisionAvoidance';
 
 // Initial Starter Mind Map Template
 const INITIAL_NODES: MapMindNode[] = [
@@ -146,15 +147,15 @@ const INITIAL_NODES: MapMindNode[] = [
 ];
 
 const INITIAL_EDGES: MapMindEdge[] = [
-  { id: 'e-root-storage', source: 'root-1', target: 'node-storage', type: 'smoothstep' },
-  { id: 'e-storage-fs', source: 'node-storage', target: 'node-storage-fs', type: 'smoothstep' },
-  { id: 'e-storage-idb', source: 'node-storage', target: 'node-storage-idb', type: 'smoothstep' },
-  { id: 'e-root-layouts', source: 'root-1', target: 'node-layouts', type: 'smoothstep' },
-  { id: 'e-layouts-dagre', source: 'node-layouts', target: 'node-layouts-dagre', type: 'smoothstep' },
-  { id: 'e-layouts-elk', source: 'node-layouts', target: 'node-layouts-elk', type: 'smoothstep' },
-  { id: 'e-root-export', source: 'root-1', target: 'node-export', type: 'smoothstep' },
-  { id: 'e-export-rough', source: 'node-export', target: 'node-export-rough', type: 'smoothstep' },
-  { id: 'e-export-pdf', source: 'node-export', target: 'node-export-pdf', type: 'smoothstep' },
+  { id: 'e-root-storage', source: 'root-1', target: 'node-storage', type: 'custom' },
+  { id: 'e-storage-fs', source: 'node-storage', target: 'node-storage-fs', type: 'custom', data: { label: 'Direct FS' } },
+  { id: 'e-storage-idb', source: 'node-storage', target: 'node-storage-idb', type: 'custom', data: { label: 'Backup' } },
+  { id: 'e-root-layouts', source: 'root-1', target: 'node-layouts', type: 'custom' },
+  { id: 'e-layouts-dagre', source: 'node-layouts', target: 'node-layouts-dagre', type: 'custom', data: { label: 'DAG Tree' } },
+  { id: 'e-layouts-elk', source: 'node-layouts', target: 'node-layouts-elk', type: 'custom', data: { label: 'Radial Tree' } },
+  { id: 'e-root-export', source: 'root-1', target: 'node-export', type: 'custom' },
+  { id: 'e-export-rough', source: 'node-export', target: 'node-export-rough', type: 'custom', data: { label: 'RoughJS' } },
+  { id: 'e-export-pdf', source: 'node-export', target: 'node-export-pdf', type: 'custom', data: { label: 'PDF Vector' } },
 ];
 
 export function AppContent() {
@@ -162,6 +163,7 @@ export function AppContent() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<MapMindEdge>(INITIAL_EDGES);
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>('root-1');
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isCanvasThemeOpen, setIsCanvasThemeOpen] = useState(false);
   const [isCleanBoardOpen, setIsCleanBoardOpen] = useState(false);
@@ -183,11 +185,15 @@ export function AppContent() {
     gridType: 'dots',
     theme: 'light',
     backgroundPreset: 'warm',
+    edgeRoutingStyle: 'curved',
+    layoutDensity: 'compact',
+    collisionAvoidance: true,
   });
 
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
   const selectedNodeIdRef = useRef(selectedNodeId);
+  const selectedEdgeIdRef = useRef(selectedEdgeId);
   const currentLayoutRef = useRef(currentLayout);
 
   useEffect(() => {
@@ -201,6 +207,10 @@ export function AppContent() {
   useEffect(() => {
     selectedNodeIdRef.current = selectedNodeId;
   }, [selectedNodeId]);
+
+  useEffect(() => {
+    selectedEdgeIdRef.current = selectedEdgeId;
+  }, [selectedEdgeId]);
 
   useEffect(() => {
     currentLayoutRef.current = currentLayout;
@@ -256,6 +266,77 @@ export function AppContent() {
   const selectedNode = useMemo(() => {
     return nodes.find((n) => n.id === selectedNodeId) || null;
   }, [nodes, selectedNodeId]);
+
+  const incomingEdge = useMemo(() => {
+    if (!selectedNodeId) return null;
+    return edges.find((e) => e.target === selectedNodeId) || null;
+  }, [edges, selectedNodeId]);
+
+  // Edge manipulation handlers
+  const handleUpdateEdgeLabel = useCallback(
+    (edgeId: string, label: string) => {
+      setEdges((eds) =>
+        eds.map((e) =>
+          e.id === edgeId
+            ? {
+                ...e,
+                label,
+                data: {
+                  ...e.data,
+                  label,
+                },
+              }
+            : e
+        )
+      );
+    },
+    [setEdges]
+  );
+
+  const handleStartEditingEdge = useCallback(
+    (edgeId: string) => {
+      setSelectedEdgeId(edgeId);
+      setSelectedNodeId(null);
+      setEdges((eds) =>
+        eds.map((e) => ({
+          ...e,
+          data: {
+            ...e.data,
+            isEditing: e.id === edgeId,
+          },
+        }))
+      );
+    },
+    [setEdges]
+  );
+
+  const handleStopEditingEdge = useCallback(
+    (edgeId: string) => {
+      setEdges((eds) =>
+        eds.map((e) =>
+          e.id === edgeId
+            ? {
+                ...e,
+                data: {
+                  ...e.data,
+                  isEditing: false,
+                },
+              }
+            : e
+        )
+      );
+    },
+    [setEdges]
+  );
+
+  const handleDeleteEdge = useCallback(
+    (edgeId: string) => {
+      setEdges((eds) => eds.filter((e) => e.id !== edgeId));
+      setSelectedEdgeId(null);
+      showNotification('Deleted connection line', 'info');
+    },
+    [setEdges, showNotification]
+  );
 
   const { setCenter, getZoom, fitView } = useReactFlow();
 
@@ -413,15 +494,17 @@ export function AppContent() {
     async (
       targetNodes: MapMindNode[],
       targetEdges: MapMindEdge[],
-      layoutMode: LayoutDirection = currentLayoutRef.current
+      layoutMode: LayoutDirection = currentLayoutRef.current,
+      density = settings.layoutDensity
     ): Promise<MapMindNode[]> => {
       try {
         if (layoutMode === 'BALANCED_MINDMAP') {
-          const res = await getElkLayout(targetNodes, targetEdges);
+          const res = await getElkLayout(targetNodes, targetEdges, { density });
           return res.nodes;
         } else {
           const res = getDagreLayout(targetNodes, targetEdges, {
             direction: layoutMode as 'TB' | 'LR' | 'BT' | 'RL',
+            density,
           });
           return res.nodes;
         }
@@ -430,6 +513,7 @@ export function AppContent() {
         try {
           const fallback = getDagreLayout(targetNodes, targetEdges, {
             direction: 'LR',
+            density,
           });
           return fallback.nodes;
         } catch {
@@ -437,7 +521,7 @@ export function AppContent() {
         }
       }
     },
-    []
+    [settings.layoutDensity]
   );
 
   // Subtree Collapse/Expand Toggle Logic
@@ -698,22 +782,29 @@ export function AppContent() {
 
       const newId = `node_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
-      // Existing children for Y positioning
+      // Existing children for positioning
       const existingChildEdges = currentEdges.filter((e) => e.source === parentId);
-      const childCount = existingChildEdges.length;
+      const existingChildNodes = existingChildEdges
+        .map((e) => currentNodes.find((n) => n.id === e.target))
+        .filter(Boolean) as MapMindNode[];
 
       // Position logic: if parent is left of center, branch left; else right
       const isLeft = parentNode.position.x < -50;
-      const xOffset = isLeft ? -250 : 250;
-      const yOffset = (childCount - Math.floor(childCount / 2)) * 80 * (childCount % 2 === 0 ? 1 : -1);
+      const xOffset = isLeft ? -270 : 270;
 
-      const newNode: MapMindNode = {
+      let targetY = parentNode.position.y;
+      if (existingChildNodes.length > 0) {
+        const maxY = Math.max(...existingChildNodes.map((n) => n.position.y));
+        targetY = maxY + 100;
+      }
+
+      const rawNewNode: MapMindNode = {
         id: newId,
         type: 'custom',
         selected: true,
         position: {
           x: parentNode.position.x + xOffset,
-          y: parentNode.position.y + yOffset,
+          y: targetY,
         },
         data: {
           label: 'New Child',
@@ -727,12 +818,15 @@ export function AppContent() {
         id: `e_${parentId}_${newId}`,
         source: parentId,
         target: newId,
-        type: 'smoothstep',
+        type: 'custom',
+        data: {
+          routingStyle: settings.edgeRoutingStyle || 'curved',
+        },
       };
 
       // Unselect all other nodes, ensure parent is uncollapsed, and append new node
-      setNodes((nds) => [
-        ...nds.map((n) => ({
+      const updatedNodes = [
+        ...currentNodes.map((n) => ({
           ...n,
           selected: false,
           data: {
@@ -741,13 +835,21 @@ export function AppContent() {
             collapsed: n.id === parentId ? false : n.data?.collapsed,
           },
         })),
-        newNode,
-      ]);
+        rawNewNode,
+      ];
+
+      // Automatically run collision avoidance so the new node never overlaps any existing branch
+      const resolvedNodes = settings.collisionAvoidance
+        ? resolveNodeDragCollision(newId, updatedNodes)
+        : updatedNodes;
+
+      setNodes(resolvedNodes);
       setEdges((eds) => [...eds, newEdge]);
       setSelectedNodeId(newId);
+      setSelectedEdgeId(null);
       setTimeout(() => centerOnNode(newId, 300), 50);
     },
-    [setNodes, setEdges, centerOnNode]
+    [setNodes, setEdges, centerOnNode, settings.edgeRoutingStyle, settings.collisionAvoidance]
   );
 
   // Add Sibling Node (Enter) with immediate edit mode
@@ -770,13 +872,22 @@ export function AppContent() {
       const parentNode = currentNodes.find((n) => n.id === parentId);
       const newId = `node_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
-      const newNode: MapMindNode = {
+      // Find all siblings
+      const siblingEdges = currentEdges.filter((e) => e.source === parentId);
+      const siblingNodes = siblingEdges
+        .map((e) => currentNodes.find((n) => n.id === e.target))
+        .filter(Boolean) as MapMindNode[];
+
+      const maxY = Math.max(currentNode.position.y, ...siblingNodes.map((s) => s.position.y));
+      const targetY = maxY + 100;
+
+      const rawNewNode: MapMindNode = {
         id: newId,
         type: 'custom',
         selected: true,
         position: {
           x: currentNode.position.x,
-          y: currentNode.position.y + 85,
+          y: targetY,
         },
         data: {
           label: 'New Idea',
@@ -790,31 +901,49 @@ export function AppContent() {
         id: `e_${parentId}_${newId}`,
         source: parentId,
         target: newId,
-        type: 'smoothstep',
+        type: 'custom',
+        data: {
+          routingStyle: settings.edgeRoutingStyle || 'curved',
+        },
       };
 
-      setNodes((nds) => [
-        ...nds.map((n) => ({ ...n, selected: false, data: { ...n.data, isEditing: false } })),
-        newNode,
-      ]);
+      const updatedNodes = [
+        ...currentNodes.map((n) => ({ ...n, selected: false, data: { ...n.data, isEditing: false } })),
+        rawNewNode,
+      ];
+
+      const resolvedNodes = settings.collisionAvoidance
+        ? resolveNodeDragCollision(newId, updatedNodes)
+        : updatedNodes;
+
+      setNodes(resolvedNodes);
       setEdges((eds) => [...eds, newEdge]);
       setSelectedNodeId(newId);
+      setSelectedEdgeId(null);
       setTimeout(() => centerOnNode(newId, 300), 50);
     },
-    [handleAddChildNode, setNodes, setEdges, centerOnNode]
+    [handleAddChildNode, setNodes, setEdges, centerOnNode, settings.edgeRoutingStyle, settings.collisionAvoidance]
   );
 
   // Add root / free node
   const handleAddNode = useCallback(() => {
+    const currentNodes = nodesRef.current;
     const newId = `node_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const newNode: MapMindNode = {
+
+    let x = 0;
+    let y = 0;
+    if (currentNodes.length > 0) {
+      const maxY = Math.max(...currentNodes.map((n) => n.position.y));
+      const avgX = currentNodes.reduce((acc, n) => acc + n.position.x, 0) / currentNodes.length;
+      x = Math.round(avgX);
+      y = Math.round(maxY + 140);
+    }
+
+    const rawNewNode: MapMindNode = {
       id: newId,
       type: 'custom',
       selected: true,
-      position: {
-        x: 100 + Math.random() * 80,
-        y: 100 + Math.random() * 80,
-      },
+      position: { x, y },
       data: {
         label: 'Topic Branch',
         colorTheme: 'blue',
@@ -823,13 +952,21 @@ export function AppContent() {
       },
     };
 
-    setNodes((nds) => [
-      ...nds.map((n) => ({ ...n, selected: false, data: { ...n.data, isEditing: false } })),
-      newNode,
-    ]);
+    const updatedNodes = [
+      ...currentNodes.map((n) => ({ ...n, selected: false, data: { ...n.data, isEditing: false } })),
+      rawNewNode,
+    ];
+
+    const resolvedNodes = settings.collisionAvoidance
+      ? resolveNodeDragCollision(newId, updatedNodes)
+      : updatedNodes;
+
+    setNodes(resolvedNodes);
     setSelectedNodeId(newId);
+    setSelectedEdgeId(null);
+    setTimeout(() => centerOnNode(newId, 300), 50);
     showNotification('Created new node', 'success');
-  }, [setNodes, showNotification]);
+  }, [setNodes, centerOnNode, showNotification, settings.collisionAvoidance]);
 
   // Spatial Keyboard Navigation (Arrows)
   const handleNavigate = useCallback(
@@ -1003,13 +1140,36 @@ export function AppContent() {
         return;
       }
 
-      // 3. Space or F2 -> Start Editing Selected Node
+      // 3. Space or F2 -> Start Editing Selected Node or Selected Edge
       if (e.key === ' ' || e.key === 'F2') {
         if (activeId) {
           e.preventDefault();
           handleStartEditingNode(activeId);
+          return;
+        } else if (selectedEdgeIdRef.current) {
+          e.preventDefault();
+          handleStartEditingEdge(selectedEdgeIdRef.current);
+          return;
         }
-        return;
+      }
+
+      // 3b. 'e' or 'l' -> Edit Edge Label / Connection Comment directly via keyboard
+      if ((e.key === 'e' || e.key === 'E' || e.key === 'l' || e.key === 'L') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (activeId) {
+          const currentEdges = edgesRef.current;
+          const targetEdge =
+            currentEdges.find((ed) => ed.target === activeId) ||
+            currentEdges.find((ed) => ed.source === activeId);
+          if (targetEdge) {
+            e.preventDefault();
+            handleStartEditingEdge(targetEdge.id);
+            return;
+          }
+        } else if (selectedEdgeIdRef.current) {
+          e.preventDefault();
+          handleStartEditingEdge(selectedEdgeIdRef.current);
+          return;
+        }
       }
 
       // 4. 'f' -> Center & Toggle Subtree Spotlight Focus; 'Shift+F' -> Fit View
@@ -1046,13 +1206,17 @@ export function AppContent() {
         return;
       }
 
-      // 6. Delete or Backspace -> Delete Selected Node
+      // 6. Delete or Backspace -> Delete Selected Node or Edge
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (activeId) {
           e.preventDefault();
           handleDeleteNode(activeId);
+          return;
+        } else if (selectedEdgeIdRef.current) {
+          e.preventDefault();
+          handleDeleteEdge(selectedEdgeIdRef.current);
+          return;
         }
-        return;
       }
 
       // 7. 'c' or '/' or '.' -> Toggle Collapse Subtree
@@ -1070,7 +1234,11 @@ export function AppContent() {
         !e.ctrlKey &&
         !e.metaKey &&
         !e.altKey &&
-        e.key !== '?'
+        e.key !== '?' &&
+        e.key !== 'e' &&
+        e.key !== 'E' &&
+        e.key !== 'l' &&
+        e.key !== 'L'
       ) {
         if (activeId) {
           handleStartEditingNode(activeId);
@@ -1105,6 +1273,8 @@ export function AppContent() {
     handleAddChildNode,
     handleAddSiblingNode,
     handleStartEditingNode,
+    handleStartEditingEdge,
+    handleDeleteEdge,
     handleNavigate,
     handleDeleteNode,
     handleToggleCollapse,
@@ -1116,24 +1286,25 @@ export function AppContent() {
 
   // Apply Layout Engine (Dagre or ELK)
   const handleApplyLayout = useCallback(
-    async (layoutType: LayoutDirection) => {
+    async (layoutType: LayoutDirection, targetDensity: LayoutDensity = settings.layoutDensity) => {
       setCurrentLayout(layoutType);
       currentLayoutRef.current = layoutType;
       setIsLayouting(true);
       try {
         if (layoutType === 'BALANCED_MINDMAP') {
-          const result = await getElkLayout(nodesWithChildCounts, edges);
+          const result = await getElkLayout(nodesWithChildCounts, edges, { density: targetDensity });
           setNodes(result.nodes);
           setEdges(result.edges);
-          showNotification('Applied Balanced Mind Map (ELK Engine)', 'success');
+          showNotification(`Applied Balanced Mind Map (${targetDensity})`, 'success');
         } else {
           const result = getDagreLayout(nodesWithChildCounts, edges, {
             direction: layoutType as 'TB' | 'LR' | 'BT' | 'RL',
+            density: targetDensity,
           });
           setNodes(result.nodes);
           setEdges(result.edges);
           showNotification(
-            `Applied ${layoutType === 'TB' ? 'Top-Down' : 'Left-to-Right'} Layout (Dagre Engine)`,
+            `Applied ${layoutType === 'TB' ? 'Top-Down' : 'Left-to-Right'} Layout (${targetDensity})`,
             'success'
           );
         }
@@ -1147,7 +1318,7 @@ export function AppContent() {
         setIsLayouting(false);
       }
     },
-    [nodesWithChildCounts, edges, setNodes, setEdges, fitView, showNotification]
+    [nodesWithChildCounts, edges, setNodes, setEdges, fitView, showNotification, settings.layoutDensity]
   );
 
   // Toggle Node Lock / Pin in place
@@ -1187,6 +1358,7 @@ export function AppContent() {
           setNodes(INITIAL_NODES);
           setEdges(INITIAL_EDGES);
           setSelectedNodeId('root-1');
+          setSelectedEdgeId(null);
           showNotification('Created new whiteboard', 'info');
         }}
         onOpen={handleOpen}
@@ -1218,6 +1390,7 @@ export function AppContent() {
           edges={edges}
           onSelectNode={(nodeId) => {
             setSelectedNodeId(nodeId);
+            setSelectedEdgeId(null);
             centerOnNode(nodeId, 300);
           }}
           isSpotlightActive={isSpotlightActive}
@@ -1233,6 +1406,7 @@ export function AppContent() {
           selectedNodeId={selectedNodeId}
           onSelectNode={(nodeId) => {
             setSelectedNodeId(nodeId);
+            setSelectedEdgeId(null);
             centerOnNode(nodeId, 300);
           }}
           onFoldLevel={handleFoldLevel}
@@ -1245,7 +1419,9 @@ export function AppContent() {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           setEdges={setEdges}
+          setNodes={setNodes}
           settings={settings}
+          selectedEdgeId={selectedEdgeId}
           onToggleCollapse={handleToggleCollapse}
           onToggleLock={handleToggleLock}
           onUpdateNodeLabel={handleUpdateNodeLabel}
@@ -1253,8 +1429,19 @@ export function AppContent() {
           onAddSiblingNode={handleAddSiblingNode}
           onStartEditingNode={handleStartEditingNode}
           onStopEditingNode={handleStopEditingNode}
-          onSelectNode={(node) => setSelectedNodeId(node ? node.id : null)}
+          onSelectNode={(node) => {
+            setSelectedNodeId(node ? node.id : null);
+            if (node) setSelectedEdgeId(null);
+          }}
+          onSelectEdge={(edgeId) => {
+            setSelectedEdgeId(edgeId);
+            if (edgeId) setSelectedNodeId(null);
+          }}
+          onUpdateEdgeLabel={handleUpdateEdgeLabel}
+          onStartEditingEdge={handleStartEditingEdge}
+          onStopEditingEdge={handleStopEditingEdge}
           onDeleteNode={handleDeleteNode}
+          onDeleteEdge={handleDeleteEdge}
         />
 
         {/* Modern Floating Action Dock */}
@@ -1272,12 +1459,34 @@ export function AppContent() {
           isLayouting={isLayouting}
           onOpenCanvasTheme={() => setIsCanvasThemeOpen(true)}
           onOpenShortcuts={() => setIsShortcutsOpen(true)}
+          edgeRoutingStyle={settings.edgeRoutingStyle}
+          onChangeEdgeRoutingStyle={(style) =>
+            setSettings((s) => ({ ...s, edgeRoutingStyle: style }))
+          }
+          collisionAvoidance={settings.collisionAvoidance}
+          onToggleCollisionAvoidance={() => {
+            const next = !settings.collisionAvoidance;
+            setSettings((s) => ({ ...s, collisionAvoidance: next }));
+            showNotification(
+              next
+                ? 'Collision Avoidance enabled (Hold Alt to overlap)'
+                : 'Collision Avoidance disabled (Free overlap allowed)',
+              'info'
+            );
+          }}
+          layoutDensity={settings.layoutDensity}
+          onChangeLayoutDensity={(density) => {
+            setSettings((s) => ({ ...s, layoutDensity: density }));
+            handleApplyLayout(currentLayout, density);
+          }}
         />
 
         {/* Selected Node Properties Inspector */}
         <NodeInspector
           selectedNode={selectedNode}
+          incomingEdge={incomingEdge}
           onUpdateNode={handleUpdateNode}
+          onUpdateEdgeLabel={handleUpdateEdgeLabel}
           onDeleteNode={handleDeleteNode}
           onClose={() => setSelectedNodeId(null)}
         />

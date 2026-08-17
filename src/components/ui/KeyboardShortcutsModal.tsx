@@ -19,6 +19,15 @@ const SHORTCUT_GROUPS = [
     ],
   },
   {
+    category: 'Edge Labeling & Path Conditions (Keyboard-First)',
+    items: [
+      { key: 'e or l', desc: 'Edit text label/comment on connection line from parent' },
+      { key: 'Enter / F2 (on edge)', desc: 'Edit text of currently selected edge/connection' },
+      { key: 'Enter (while editing label)', desc: 'Commit edge label and return focus to canvas' },
+      { key: 'Delete / Backspace (on edge)', desc: 'Delete selected connection line' },
+    ],
+  },
+  {
     category: 'Spatial & Tree Navigation',
     items: [
       { key: '↑ (Arrow Up)', desc: 'Navigate to previous sibling or upper node' },
@@ -44,6 +53,7 @@ const SHORTCUT_GROUPS = [
     items: [
       { key: 'Delete / Backspace', desc: 'Delete node and select its direct parent' },
       { key: 'c or /', desc: 'Collapse / Expand subtree of selected node' },
+      { key: 'Alt + Drag (node)', desc: 'Manual override: Intentionally overlap elements' },
       { key: 'Ctrl + S', desc: 'Silent Save to file (retains handle)' },
       { key: 'Ctrl + Shift + S', desc: 'Save As new diagram file' },
       { key: 'Ctrl + O', desc: 'Open diagram file from disk' },

@@ -1,14 +1,24 @@
 import ELK, { ElkNode, ElkExtendedEdge } from 'elkjs/lib/elk.bundled.js';
-import { MapMindNode, MapMindEdge } from '@/types/graph';
+import { MapMindNode, MapMindEdge, LayoutDensity } from '@/types/graph';
 import { getDagreLayout } from './dagreLayout';
 
 const elk = new ELK();
 
 export interface ElkLayoutOptions {
+  density?: LayoutDensity;
   nodeWidth?: number;
   nodeHeight?: number;
   spacing?: number;
 }
+
+const ELK_DENSITY_CONFIGS: Record<
+  LayoutDensity,
+  { spacing: number; levelSpacing: number; layerSpacing: number; rootGap: number; nodeW: number; nodeH: number }
+> = {
+  compact: { spacing: 26, levelSpacing: 38, layerSpacing: 34, rootGap: 28, nodeW: 190, nodeH: 72 },
+  balanced: { spacing: 44, levelSpacing: 58, layerSpacing: 52, rootGap: 45, nodeW: 210, nodeH: 80 },
+  spacious: { spacing: 65, levelSpacing: 85, layerSpacing: 75, rootGap: 65, nodeW: 230, nodeH: 90 },
+};
 
 /**
  * Helper to find all descendants of a given node in the graph
@@ -51,7 +61,16 @@ export async function getElkLayout(
   options: ElkLayoutOptions = {}
 ): Promise<{ nodes: MapMindNode[]; edges: MapMindEdge[] }> {
   try {
-    const { nodeWidth = 220, nodeHeight = 85, spacing = 60 } = options;
+    const density = options.density || 'compact';
+    const cfg = ELK_DENSITY_CONFIGS[density];
+    const {
+      nodeWidth = cfg.nodeW,
+      nodeHeight = cfg.nodeH,
+      spacing = cfg.spacing,
+    } = options;
+    const levelSpacing = cfg.levelSpacing;
+    const layerSpacing = cfg.layerSpacing;
+    const rootGap = cfg.rootGap;
 
     const visibleNodes = nodes.filter((n) => !n.data?.hidden);
     const visibleNodeIds = new Set(visibleNodes.map((n) => n.id));
@@ -134,9 +153,9 @@ export async function getElkLayout(
           'elk.algorithm': 'mrtree',
           'elk.direction': direction,
           'elk.spacing.nodeNode': `${spacing}`,
-          'elk.layered.spacing.nodeNodeBetweenLayers': `${spacing * 1.5}`,
+          'elk.layered.spacing.nodeNodeBetweenLayers': `${layerSpacing}`,
           'elk.mrtree.nodeNodeSpacing': `${spacing}`,
-          'elk.mrtree.levelSpacing': `${spacing * 1.8}`,
+          'elk.mrtree.levelSpacing': `${levelSpacing}`,
         },
         children: [
           { id: virtualRootId, width: 1, height: 1 },
@@ -190,7 +209,7 @@ export async function getElkLayout(
     // Place right nodes to the right of root
     rightPositions.forEach((pos, id) => {
       nodePositions.set(id, {
-        x: rootX + rootW / 2 + pos.x + spacing * 1.2,
+        x: rootX + rootW / 2 + pos.x + rootGap,
         y: rootY + rootH / 2 + pos.y,
       });
     });
@@ -198,7 +217,7 @@ export async function getElkLayout(
     // Place left nodes to the left of root
     leftPositions.forEach((pos, id) => {
       nodePositions.set(id, {
-        x: rootX - rootW / 2 + pos.x - spacing * 1.2,
+        x: rootX - rootW / 2 + pos.x - rootGap,
         y: rootY + rootH / 2 + pos.y,
       });
     });
@@ -223,7 +242,7 @@ export async function getElkLayout(
     return { nodes: layoutedNodes, edges };
   } catch (err) {
     console.warn('ELK balanced mindmap layout failed, falling back to Dagre LR:', err);
-    return getDagreLayout(nodes, edges, { direction: 'LR' });
+    return getDagreLayout(nodes, edges, { direction: 'LR', density: options.density });
   }
 }
 
@@ -237,7 +256,14 @@ export async function runStandardElkTree(
   options: ElkLayoutOptions = {}
 ): Promise<{ nodes: MapMindNode[]; edges: MapMindEdge[] }> {
   try {
-    const { nodeWidth = 220, nodeHeight = 85, spacing = 60 } = options;
+    const density = options.density || 'compact';
+    const cfg = ELK_DENSITY_CONFIGS[density];
+    const {
+      nodeWidth = cfg.nodeW,
+      nodeHeight = cfg.nodeH,
+      spacing = cfg.spacing,
+    } = options;
+    const layerSpacing = cfg.layerSpacing;
 
     const visibleNodes = nodes.filter((n) => !n.data?.hidden);
     const visibleNodeIds = new Set(visibleNodes.map((n) => n.id));
@@ -251,7 +277,7 @@ export async function runStandardElkTree(
         'elk.algorithm': 'layered',
         'elk.direction': direction,
         'elk.spacing.nodeNode': `${spacing}`,
-        'elk.layered.spacing.nodeNodeBetweenLayers': `${spacing * 1.5}`,
+        'elk.layered.spacing.nodeNodeBetweenLayers': `${layerSpacing}`,
       },
       children: visibleNodes.map((node) => {
         const w = node.measured?.width || (node.width as number) || nodeWidth;

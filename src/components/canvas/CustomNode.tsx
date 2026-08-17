@@ -113,6 +113,195 @@ const COLOR_CLASSES: Record<
   },
 };
 
+const THEME_COLORS: Record<
+  NodeColorTheme,
+  {
+    fillLight: string;
+    strokeLight: string;
+    fillDark: string;
+    strokeDark: string;
+  }
+> = {
+  slate: { fillLight: '#ffffff', strokeLight: '#94a3b8', fillDark: '#1e293b', strokeDark: '#64748b' },
+  blue: { fillLight: '#eff6ff', strokeLight: '#3b82f6', fillDark: '#0f172a', strokeDark: '#3b82f6' },
+  emerald: { fillLight: '#ecfdf5', strokeLight: '#10b981', fillDark: '#064e3b', strokeDark: '#34d399' },
+  amber: { fillLight: '#fffbeb', strokeLight: '#f59e0b', fillDark: '#451a03', strokeDark: '#fbbf24' },
+  rose: { fillLight: '#fff1f2', strokeLight: '#f43f5e', fillDark: '#4c0519', strokeDark: '#fb7185' },
+  purple: { fillLight: '#faf5ff', strokeLight: '#a855f7', fillDark: '#2e1065', strokeDark: '#c084fc' },
+  cyan: { fillLight: '#ecfeff', strokeLight: '#06b6d4', fillDark: '#083344', strokeDark: '#22d3ee' },
+};
+
+const THEME_GRADIENTS: Record<
+  NodeColorTheme,
+  {
+    fromLight: string;
+    toLight: string;
+    fromDark: string;
+    toDark: string;
+    glow: string;
+    strokeLight: string;
+    strokeDark: string;
+  }
+> = {
+  slate: {
+    fromLight: '#f8fafc',
+    toLight: '#e2e8f0',
+    fromDark: '#0f172a',
+    toDark: '#1e293b',
+    glow: 'rgba(100, 116, 139, 0.4)',
+    strokeLight: '#94a3b8',
+    strokeDark: '#64748b',
+  },
+  blue: {
+    fromLight: '#eff6ff',
+    toLight: '#dbeafe',
+    fromDark: '#0f172a',
+    toDark: '#1e3a8a',
+    glow: 'rgba(59, 130, 246, 0.45)',
+    strokeLight: '#60a5fa',
+    strokeDark: '#3b82f6',
+  },
+  emerald: {
+    fromLight: '#ecfdf5',
+    toLight: '#d1fae5',
+    fromDark: '#022c22',
+    toDark: '#064e3b',
+    glow: 'rgba(16, 185, 129, 0.45)',
+    strokeLight: '#34d399',
+    strokeDark: '#10b981',
+  },
+  amber: {
+    fromLight: '#fffbeb',
+    toLight: '#fef3c7',
+    fromDark: '#291002',
+    toDark: '#451a03',
+    glow: 'rgba(245, 158, 11, 0.45)',
+    strokeLight: '#fbbf24',
+    strokeDark: '#f59e0b',
+  },
+  rose: {
+    fromLight: '#fff1f2',
+    toLight: '#ffe4e6',
+    fromDark: '#2c0410',
+    toDark: '#4c0519',
+    glow: 'rgba(244, 63, 94, 0.45)',
+    strokeLight: '#fb7185',
+    strokeDark: '#f43f5e',
+  },
+  purple: {
+    fromLight: '#faf5ff',
+    toLight: '#f3e8ff',
+    fromDark: '#1d073f',
+    toDark: '#2e1065',
+    glow: 'rgba(168, 85, 247, 0.45)',
+    strokeLight: '#c084fc',
+    strokeDark: '#a855f7',
+  },
+  cyan: {
+    fromLight: '#ecfeff',
+    toLight: '#cffafe',
+    fromDark: '#04202c',
+    toDark: '#083344',
+    glow: 'rgba(6, 182, 212, 0.45)',
+    strokeLight: '#22d3ee',
+    strokeDark: '#06b6d4',
+  },
+};
+
+function getSvgStyleForCard(
+  cardStyle: NodeCardStyle,
+  colorTheme: NodeColorTheme,
+  isDark: boolean,
+  selected: boolean,
+  id: string
+) {
+  const theme = THEME_COLORS[colorTheme] || THEME_COLORS.slate;
+  const gradient = THEME_GRADIENTS[colorTheme] || THEME_GRADIENTS.slate;
+
+  let fill = isDark ? theme.fillDark : theme.fillLight;
+  let stroke = selected ? '#3b82f6' : isDark ? theme.strokeDark : theme.strokeLight;
+  let strokeWidth = selected ? 3 : 2;
+  let filter = selected
+    ? 'drop-shadow(0 0 10px rgba(59, 130, 246, 0.8))'
+    : 'drop-shadow(0 2px 6px rgba(0, 0, 0, 0.08))';
+
+  if (cardStyle === 'bold') {
+    fill = isDark ? '#0f172a' : '#ffffff';
+    stroke = selected ? '#3b82f6' : isDark ? '#ffffff' : '#09090b';
+    strokeWidth = selected ? 3.5 : 2.5;
+    filter = selected
+      ? 'drop-shadow(0 0 10px rgba(59, 130, 246, 0.8))'
+      : isDark
+      ? 'drop-shadow(4px 4px 0px #ffffff)'
+      : 'drop-shadow(4px 4px 0px #09090b)';
+  } else if (cardStyle === 'classy') {
+    fill = isDark ? 'rgba(15, 23, 42, 0.55)' : 'rgba(255, 255, 255, 0.55)';
+    stroke = selected ? '#3b82f6' : isDark ? 'rgba(148, 163, 184, 0.5)' : 'rgba(255, 255, 255, 0.9)';
+    strokeWidth = selected ? 3 : 1.75;
+    filter = selected
+      ? 'drop-shadow(0 0 12px rgba(59, 130, 246, 0.8))'
+      : isDark
+      ? 'drop-shadow(0 8px 32px rgba(0, 0, 0, 0.4))'
+      : 'drop-shadow(0 8px 32px rgba(31, 38, 135, 0.12))';
+  } else if (cardStyle === 'gradient') {
+    fill = `url(#node-grad-${id})`;
+    stroke = selected ? '#3b82f6' : isDark ? gradient.strokeDark : gradient.strokeLight;
+    strokeWidth = selected ? 3 : 2;
+    filter = selected
+      ? 'drop-shadow(0 0 14px rgba(59, 130, 246, 0.9))'
+      : `drop-shadow(0 0 16px ${gradient.glow})`;
+  } else if (cardStyle === 'minimal') {
+    fill = isDark ? '#0f172a' : '#ffffff';
+    stroke = selected ? '#3b82f6' : isDark ? theme.strokeDark : theme.strokeLight;
+    strokeWidth = selected ? 3 : 1.5;
+    filter = selected
+      ? 'drop-shadow(0 0 8px rgba(59, 130, 246, 0.8))'
+      : 'drop-shadow(0 1px 3px rgba(0, 0, 0, 0.05))';
+  } else if (cardStyle === 'notion') {
+    fill = isDark ? '#202020' : '#ffffff';
+    stroke = selected ? '#3b82f6' : isDark ? '#37352f' : '#e3e2e0';
+    strokeWidth = selected ? 3 : 1.5;
+    filter = selected
+      ? 'drop-shadow(0 0 8px rgba(59, 130, 246, 0.8))'
+      : 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.04))';
+  }
+
+  return { fill, stroke, strokeWidth, filter, gradient };
+}
+
+function getCloudSvgPath(w: number, h: number): string {
+  const pad = 6;
+  const width = Math.max(w - pad * 2, 80);
+  const height = Math.max(h - pad * 2, 50);
+  const x = pad;
+  const y = pad;
+
+  const x0 = x;
+  const x1 = x + width * 0.25;
+  const x2 = x + width * 0.5;
+  const x3 = x + width * 0.75;
+  const x4 = x + width;
+
+  const y0 = y;
+  const y1 = y + height * 0.5;
+  const y2 = y + height;
+
+  return `
+    M ${x1},${y0 + 2}
+    C ${x1 - 15},${y0 - 12} ${x0 + 10},${y0 - 8} ${x0 + 12},${y0 + 14}
+    C ${x0 - 14},${y0 + 16} ${x0 - 14},${y1 + 4} ${x0 + 10},${y1 + 10}
+    C ${x0 - 12},${y1 + 16} ${x0 - 6},${y2 + 8} ${x1 - 6},${y2 - 2}
+    C ${x1},${y2 + 14} ${x2 - 10},${y2 + 14} ${x2},${y2 - 2}
+    C ${x2 + 10},${y2 + 14} ${x3},${y2 + 14} ${x3 + 6},${y2 - 2}
+    C ${x4 - 4},${y2 + 10} ${x4 + 14},${y2 + 2} ${x4 - 6},${y1 + 12}
+    C ${x4 + 14},${y1 + 4} ${x4 + 14},${y0 + 16} ${x4 - 10},${y0 + 12}
+    C ${x4 - 8},${y0 - 10} ${x3 + 12},${y0 - 12} ${x3},${y0 + 2}
+    C ${x3 - 10},${y0 - 14} ${x2 + 10},${y0 - 14} ${x2},${y0 + 2}
+    C ${x2 - 10},${y0 - 14} ${x1 + 10},${y0 - 14} ${x1},${y0 + 2}
+    Z
+  `.replace(/\s+/g, ' ').trim();
+}
+
 export interface CustomNodeProps extends NodeProps {
   data: CustomNodeData & {
     sketchMode?: boolean;
@@ -132,7 +321,7 @@ export const CustomNode = memo(({ id, data, selected }: CustomNodeProps) => {
   const [labelValue, setLabelValue] = useState(data.label || 'Node');
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState({ width: 230, height: 95 });
+  const [dimensions, setDimensions] = useState({ width: 190, height: 75 });
 
   const isCollapsed = Boolean(data.collapsed);
   const isHidden = Boolean(data.hidden);
@@ -146,6 +335,21 @@ export const CustomNode = memo(({ id, data, selected }: CustomNodeProps) => {
   const theme = COLOR_CLASSES[colorTheme] || COLOR_CLASSES.slate;
 
   const isEditing = Boolean(data.isEditing) || internalEditing;
+  const isCustomSvgShape = (shape === 'diamond' || shape === 'cloud') && !isSketch;
+
+  // Track dark theme reactively
+  const [isDark, setIsDark] = useState(() =>
+    typeof document !== 'undefined' ? document.documentElement.classList.contains('dark') : false
+  );
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const observer = new MutationObserver(() => {
+      setIsDark(document.documentElement.classList.contains('dark'));
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     setLabelValue(data.label || '');
@@ -159,12 +363,13 @@ export const CustomNode = memo(({ id, data, selected }: CustomNodeProps) => {
 
   useEffect(() => {
     if (containerRef.current) {
+      const el = containerRef.current;
       setDimensions({
-        width: containerRef.current.offsetWidth || 230,
-        height: containerRef.current.offsetHeight || 95,
+        width: Math.max(el.offsetWidth, shape === 'diamond' ? 195 : shape === 'cloud' ? 190 : 175),
+        height: Math.max(el.offsetHeight, shape === 'diamond' ? 90 : shape === 'cloud' ? 80 : 65),
       });
     }
-  }, [data.label, data.tags, isCollapsed, isEditing, isLocked, shape, cardStyle]);
+  }, [data.label, data.sublabel, data.tags, isCollapsed, isEditing, isLocked, shape, cardStyle]);
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -296,41 +501,46 @@ export const CustomNode = memo(({ id, data, selected }: CustomNodeProps) => {
   }
 
   // 1. Shape Geometry Computation
-  let shapeClass = 'rounded-2xl';
-  let paddingClass = 'p-4';
+  let shapeClass = 'rounded-xl';
+  let paddingClass = 'p-2.5';
 
-  if (shape === 'pill' || (isRoot && shape !== 'sharp' && shape !== 'card' && shape !== 'banner')) {
+  if (shape === 'pill' || (isRoot && shape !== 'sharp' && shape !== 'card' && shape !== 'banner' && shape !== 'cloud' && shape !== 'diamond')) {
     shapeClass = 'rounded-full';
-    paddingClass = 'px-6 py-3.5';
+    paddingClass = 'px-3.5 py-1.5';
   } else if (shape === 'sharp') {
-    shapeClass = 'rounded-none';
-    paddingClass = 'p-4';
+    shapeClass = 'rounded-none border-2';
+    paddingClass = 'p-2.5';
   } else if (shape === 'cloud') {
-    shapeClass = 'rounded-3xl';
-    paddingClass = 'p-4.5';
+    // ☁️ Authentic Thought Cloud
+    shapeClass = 'border-0 bg-transparent shadow-none';
+    paddingClass = 'px-6 py-3.5 text-center';
   } else if (shape === 'banner') {
-    shapeClass = 'rounded-2xl overflow-hidden';
-    paddingClass = 'pt-0 px-4 pb-4';
+    shapeClass = 'rounded-xl overflow-hidden border';
+    paddingClass = 'pt-0 px-2.5 pb-2';
   } else if (shape === 'diamond') {
-    shapeClass = 'rounded-xl border-2';
-    paddingClass = 'p-4';
+    // 💎 Authentic 4-Point Rhombus Diamond
+    shapeClass = 'border-0 bg-transparent shadow-none';
+    paddingClass = 'px-7 py-4.5 text-center';
   }
 
   // 2. Dramatically Distinct Card Styles
-  let styleClass = `${theme.bg} ${theme.border} border shadow-md`;
+  const svgStyle = getSvgStyleForCard(cardStyle, colorTheme, isDark, selected, id);
+  let styleClass = `${theme.bg} ${theme.border} border shadow-xs`;
 
-  if (cardStyle === 'bold') {
-    // 💥 Neo-Brutalist Bold: High contrast 3px outline with solid offset sticker shadow
-    styleClass = `bg-white dark:bg-slate-900 border-2.5 border-slate-950 dark:border-white shadow-[5px_5px_0px_0px_#09090b] dark:shadow-[5px_5px_0px_0px_#ffffff] font-sans`;
+  if (isCustomSvgShape) {
+    styleClass = cardStyle === 'classy' ? 'bg-transparent border-0 shadow-none backdrop-blur-xl' : 'bg-transparent border-0 shadow-none';
+  } else if (cardStyle === 'bold') {
+    // 💥 Neo-Brutalist Bold: High contrast 2.5px outline with compact 3px offset sticker shadow
+    styleClass = `bg-white dark:bg-slate-900 border-2 border-slate-950 dark:border-white shadow-[3px_3px_0px_0px_#09090b] dark:shadow-[3px_3px_0px_0px_#ffffff] font-sans`;
   } else if (cardStyle === 'classy') {
     // 🧊 True Frosted Glassmorphism: Translucent acrylic, glossy reflection, luxury depth
-    styleClass = `backdrop-blur-2xl bg-white/40 dark:bg-slate-900/40 border-2 border-white/80 dark:border-slate-600/40 shadow-[0_8px_32px_0_rgba(31,38,135,0.12)] dark:shadow-[0_8px_32px_0_rgba(0,0,0,0.4)]`;
+    styleClass = `backdrop-blur-2xl bg-white/40 dark:bg-slate-900/40 border border-white/80 dark:border-slate-600/40 shadow-[0_4px_20px_0_rgba(31,38,135,0.1)] dark:shadow-[0_4px_20px_0_rgba(0,0,0,0.35)]`;
   } else if (cardStyle === 'minimal') {
     // 🪶 Minimalist Clean: No heavy box border! Clean floating surface with a bold left accent strip
-    styleClass = `bg-white/95 dark:bg-slate-900/95 border-l-4 ${theme.accentBorder} border-t-0 border-r-0 border-b-0 shadow-sm hover:shadow-md`;
+    styleClass = `bg-white/95 dark:bg-slate-900/95 border-l-3 ${theme.accentBorder} border-t-0 border-r-0 border-b-0 shadow-xs hover:shadow-sm`;
   } else if (cardStyle === 'gradient') {
     // ✨ Aesthetic Glow: Rich colorful gradient wash with vibrant neon ambient halo
-    styleClass = `bg-gradient-to-br ${theme.gradientBg} border-2 border-indigo-400/40 dark:border-indigo-500/40 ${theme.glowShadow}`;
+    styleClass = `bg-gradient-to-br ${theme.gradientBg} border border-indigo-400/40 dark:border-indigo-500/40 ${theme.glowShadow}`;
   } else if (cardStyle === 'notion') {
     // 📄 Notion Clean: Classic Notion document card with structured header divider
     styleClass = `bg-[#ffffff] dark:bg-[#202020] border border-[#e3e2e0] dark:border-[#37352f] shadow-2xs font-sans`;
@@ -340,19 +550,29 @@ export const CustomNode = memo(({ id, data, selected }: CustomNodeProps) => {
     <div
       ref={containerRef}
       onClick={handleNodeClick}
-      className={`group relative min-w-[200px] max-w-[340px] transition-all duration-200 select-none ${
+      className={`group relative ${
+        shape === 'diamond'
+          ? 'w-[195px] min-h-[90px]'
+          : shape === 'cloud'
+          ? 'w-[190px] min-h-[80px]'
+          : 'w-[185px] max-w-[210px]'
+      } transition-all duration-200 select-none ${
+        isCustomSvgShape ? 'overflow-visible' : 'overflow-hidden'
+      } ${
         isSketch
-          ? 'p-3 font-sketch text-lg'
+          ? 'p-2 font-sketch text-sm'
           : `${shapeClass} ${styleClass} ${paddingClass}`
       } ${
         isDimmed ? 'opacity-15 grayscale filter contrast-50 pointer-events-none' : 'opacity-100'
       } ${
-        selected && !isSketch
+        selected && !isSketch && !isCustomSvgShape
           ? cardStyle === 'bold'
-            ? 'ring-4 ring-blue-600 ring-offset-3 dark:ring-offset-slate-950 scale-[1.03] z-30'
-            : 'ring-4 ring-blue-500/90 ring-offset-3 dark:ring-offset-slate-950 shadow-2xl scale-[1.03] z-30'
+            ? 'ring-3 ring-blue-600 ring-offset-2 dark:ring-offset-slate-950 scale-[1.02] z-30'
+            : 'ring-3 ring-blue-500/90 ring-offset-2 dark:ring-offset-slate-950 shadow-xl scale-[1.02] z-30'
+          : selected && !isSketch && isCustomSvgShape
+          ? 'scale-[1.02] z-30'
           : isSpotlightTarget && !isSketch
-          ? 'ring-3 ring-indigo-500 shadow-[0_0_25px_rgba(99,102,241,0.4)] z-20'
+          ? 'ring-2 ring-indigo-500 shadow-[0_0_20px_rgba(99,102,241,0.35)] z-20'
           : 'hover:scale-[1.01]'
       } ${isLocked ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}`}
       onDoubleClick={(e) => {
@@ -361,21 +581,69 @@ export const CustomNode = memo(({ id, data, selected }: CustomNodeProps) => {
         data.onStartEditing?.(id);
       }}
     >
+      {/* 💎 Authentic 4-Point Diamond (Rhombus) Background */}
+      {shape === 'diamond' && !isSketch && (
+        <svg
+          className="absolute inset-0 w-full h-full pointer-events-none overflow-visible z-0"
+          style={{ filter: svgStyle.filter }}
+        >
+          {cardStyle === 'gradient' && (
+            <defs>
+              <linearGradient id={`node-grad-${id}`} x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor={isDark ? svgStyle.gradient.fromDark : svgStyle.gradient.fromLight} />
+                <stop offset="100%" stopColor={isDark ? svgStyle.gradient.toDark : svgStyle.gradient.toLight} />
+              </linearGradient>
+            </defs>
+          )}
+          <polygon
+            points={`${dimensions.width / 2},3 ${dimensions.width - 3},${dimensions.height / 2} ${dimensions.width / 2},${dimensions.height - 3} 3,${dimensions.height / 2}`}
+            fill={svgStyle.fill}
+            stroke={svgStyle.stroke}
+            strokeWidth={svgStyle.strokeWidth}
+            strokeLinejoin="round"
+          />
+        </svg>
+      )}
+
+      {/* ☁️ Authentic Scalloped Thought Cloud Background */}
+      {shape === 'cloud' && !isSketch && (
+        <svg
+          className="absolute inset-0 w-full h-full pointer-events-none overflow-visible z-0"
+          style={{ filter: svgStyle.filter }}
+        >
+          {cardStyle === 'gradient' && (
+            <defs>
+              <linearGradient id={`node-grad-${id}`} x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor={isDark ? svgStyle.gradient.fromDark : svgStyle.gradient.fromLight} />
+                <stop offset="100%" stopColor={isDark ? svgStyle.gradient.toDark : svgStyle.gradient.toLight} />
+              </linearGradient>
+            </defs>
+          )}
+          <path
+            d={getCloudSvgPath(dimensions.width, dimensions.height)}
+            fill={svgStyle.fill}
+            stroke={svgStyle.stroke}
+            strokeWidth={svgStyle.strokeWidth}
+            strokeLinejoin="round"
+          />
+        </svg>
+      )}
+
       {/* Top Banner Accent for Banner Shape */}
       {shape === 'banner' && !isSketch && (
-        <div className={`h-2.5 -mx-4 mb-3 ${theme.bannerBg}`} />
+        <div className={`h-2 -mx-3 mb-2 ${theme.bannerBg}`} />
       )}
 
       {/* Frosted Glass Top Gloss Reflection Line */}
-      {cardStyle === 'classy' && !isSketch && (
+      {cardStyle === 'classy' && !isSketch && !isCustomSvgShape && (
         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/90 to-transparent pointer-events-none" />
       )}
 
       {/* Notion Style Header Strip */}
       {cardStyle === 'notion' && !isSketch && (
-        <div className="flex items-center gap-1.5 pb-1.5 mb-1.5 border-b border-[#f1f1ef] dark:border-[#2f2f2f] text-[10px] font-mono text-slate-500 dark:text-slate-400">
-          <FileText className="w-3.5 h-3.5 opacity-60" />
-          <span>Page Document</span>
+        <div className={`flex items-center gap-1 pb-1 mb-1 border-b border-[#f1f1ef] dark:border-[#2f2f2f] text-[9px] font-mono text-slate-500 dark:text-slate-400 ${isCustomSvgShape ? 'justify-center w-full' : ''}`}>
+          <FileText className="w-3 h-3 opacity-60" />
+          <span>Page</span>
         </div>
       )}
 
@@ -396,94 +664,94 @@ export const CustomNode = memo(({ id, data, selected }: CustomNodeProps) => {
         type="target"
         position={Position.Left}
         id="target-left"
-        className="!w-2.5 !h-2.5 !bg-slate-400 dark:!bg-slate-500 !border-2 !border-white dark:!border-slate-800 transition-transform group-hover:scale-125 !-left-1.5"
+        className="!w-2 !h-2 !bg-slate-400 dark:!bg-slate-500 !border-[1.5px] !border-white dark:!border-slate-800 transition-transform group-hover:scale-125 !-left-1"
       />
       <Handle
         type="source"
         position={Position.Left}
         id="source-left"
-        className="!w-2.5 !h-2.5 !bg-slate-400 dark:!bg-slate-500 !border-2 !border-white dark:!border-slate-800 transition-transform group-hover:scale-125 !-left-1.5 opacity-0"
+        className="!w-2 !h-2 !bg-slate-400 dark:!bg-slate-500 !border-[1.5px] !border-white dark:!border-slate-800 transition-transform group-hover:scale-125 !-left-1 opacity-0"
       />
       <Handle
         type="target"
         position={Position.Right}
         id="target-right"
-        className="!w-2.5 !h-2.5 !bg-slate-400 dark:!bg-slate-500 !border-2 !border-white dark:!border-slate-800 transition-transform group-hover:scale-125 !-right-1.5 opacity-0"
+        className="!w-2 !h-2 !bg-slate-400 dark:!bg-slate-500 !border-[1.5px] !border-white dark:!border-slate-800 transition-transform group-hover:scale-125 !-right-1 opacity-0"
       />
       <Handle
         type="source"
         position={Position.Right}
         id="source-right"
-        className="!w-2.5 !h-2.5 !bg-slate-400 dark:!bg-slate-500 !border-2 !border-white dark:!border-slate-800 transition-transform group-hover:scale-125 !-right-1.5"
+        className="!w-2 !h-2 !bg-slate-400 dark:!bg-slate-500 !border-[1.5px] !border-white dark:!border-slate-800 transition-transform group-hover:scale-125 !-right-1"
       />
       <Handle
         type="target"
         position={Position.Top}
         id="target-top"
-        className="!w-2.5 !h-2.5 !bg-slate-400 dark:!bg-slate-500 !border-2 !border-white dark:!border-slate-800 transition-transform group-hover:scale-125 !-top-1.5"
+        className="!w-2 !h-2 !bg-slate-400 dark:!bg-slate-500 !border-[1.5px] !border-white dark:!border-slate-800 transition-transform group-hover:scale-125 !-top-1"
       />
       <Handle
         type="source"
         position={Position.Top}
         id="source-top"
-        className="!w-2.5 !h-2.5 !bg-slate-400 dark:!bg-slate-500 !border-2 !border-white dark:!border-slate-800 transition-transform group-hover:scale-125 !-top-1.5 opacity-0"
+        className="!w-2 !h-2 !bg-slate-400 dark:!bg-slate-500 !border-[1.5px] !border-white dark:!border-slate-800 transition-transform group-hover:scale-125 !-top-1 opacity-0"
       />
       <Handle
         type="target"
         position={Position.Bottom}
         id="target-bottom"
-        className="!w-2.5 !h-2.5 !bg-slate-400 dark:!bg-slate-500 !border-2 !border-white dark:!border-slate-800 transition-transform group-hover:scale-125 !-bottom-1.5 opacity-0"
+        className="!w-2 !h-2 !bg-slate-400 dark:!bg-slate-500 !border-[1.5px] !border-white dark:!border-slate-800 transition-transform group-hover:scale-125 !-bottom-1 opacity-0"
       />
       <Handle
         type="source"
         position={Position.Bottom}
         id="source-bottom"
-        className="!w-2.5 !h-2.5 !bg-slate-400 dark:!bg-slate-500 !border-2 !border-white dark:!border-slate-800 transition-transform group-hover:scale-125 !-bottom-1.5"
+        className="!w-2 !h-2 !bg-slate-400 dark:!bg-slate-500 !border-[1.5px] !border-white dark:!border-slate-800 transition-transform group-hover:scale-125 !-bottom-1"
       />
 
       {/* Node Content Header & Label */}
-      <div className="relative z-10 flex flex-col gap-1.5 pointer-events-auto">
-        <div className="flex items-center justify-between gap-2">
+      <div className={`relative z-10 flex flex-col gap-1 pointer-events-auto ${shape === 'diamond' || shape === 'cloud' ? 'items-center text-center' : ''}`}>
+        <div className={`flex items-center gap-1.5 ${shape === 'diamond' || shape === 'cloud' ? 'justify-center w-full' : 'justify-between'}`}>
           {/* Root or category indicator */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1">
             {isRoot ? (
-              <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-blue-600 text-white shadow-xs">
-                <Sparkles className="w-3 h-3" />
+              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold uppercase tracking-wider px-2 py-0.2 rounded-full bg-blue-600 text-white shadow-2xs">
+                <Sparkles className="w-2.5 h-2.5" />
                 Root
               </span>
             ) : (
-              <span className={`w-2.5 h-2.5 rounded-full ${theme.accent}`} />
+              <span className={`w-2 h-2 rounded-full ${theme.accent}`} />
             )}
 
             {/* Lock status badge */}
             {isLocked && (
-              <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 text-amber-900 dark:text-amber-300">
-                <Lock className="w-2.5 h-2.5" />
+              <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1 py-0.2 rounded bg-amber-100 dark:bg-amber-900/60 text-amber-900 dark:text-amber-300">
+                <Lock className="w-2 h-2" />
                 Stuck
               </span>
             )}
           </div>
 
           {/* Action Buttons: Lock, Add Child (+), Subtree (+/-) */}
-          <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center gap-0.5 opacity-80 group-hover:opacity-100 transition-opacity">
             <button
               onClick={handleToggleLock}
               title={isLocked ? 'Pinned in place (Click to unlock)' : 'Free to move (Click to stick/lock)'}
-              className={`p-1 rounded transition-colors ${
+              className={`p-0.5 rounded transition-colors ${
                 isLocked
                   ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200'
                   : 'hover:bg-slate-200/70 dark:hover:bg-slate-700/70 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
               }`}
             >
-              {isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+              {isLocked ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
             </button>
 
             <button
               onClick={handleAddChild}
               title="Add child node (or press Tab)"
-              className="p-1 rounded hover:bg-slate-200/70 dark:hover:bg-slate-700/70 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 transition-colors"
+              className="p-0.5 rounded hover:bg-slate-200/70 dark:hover:bg-slate-700/70 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 transition-colors"
             >
-              <Plus className="w-3.5 h-3.5" />
+              <Plus className="w-3 h-3" />
             </button>
 
             {(descendantCount > 0 || childCount > 0) && (
@@ -494,19 +762,19 @@ export const CustomNode = memo(({ id, data, selected }: CustomNodeProps) => {
                     ? `Expand ${descendantCount > 0 ? descendantCount : childCount} sub-nodes`
                     : 'Collapse branch'
                 }
-                className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold transition-all ${
+                className={`flex items-center gap-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold transition-all ${
                   isCollapsed
-                    ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-xs scale-105'
+                    ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-2xs scale-105'
                     : 'bg-slate-200/80 dark:bg-slate-700/80 text-slate-800 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-600'
                 }`}
               >
                 {isCollapsed ? (
                   <>
-                    <Plus className="w-3 h-3" />
+                    <Plus className="w-2.5 h-2.5" />
                     <span>+{descendantCount > 0 ? descendantCount : childCount}</span>
                   </>
                 ) : (
-                  <Minus className="w-3 h-3" />
+                  <Minus className="w-2.5 h-2.5" />
                 )}
               </button>
             )}
@@ -527,13 +795,13 @@ export const CustomNode = memo(({ id, data, selected }: CustomNodeProps) => {
             onClick={(e) => e.stopPropagation()}
             onBlur={() => handleFinishEditing('none')}
             onKeyDown={handleKeyDown}
-            className="w-full bg-white dark:bg-slate-900 border-2 border-blue-500 rounded-lg px-2.5 py-1 text-[15px] font-bold text-slate-950 dark:text-slate-50 outline-none shadow-sm"
+            className="w-full bg-white dark:bg-slate-900 border-2 border-blue-500 rounded-md px-2 py-0.5 text-[13.5px] font-bold text-slate-950 dark:text-slate-50 outline-none shadow-xs text-center"
           />
         ) : (
           <div
-            className={`text-[15px] font-bold tracking-tight leading-snug cursor-text break-words ${theme.text} ${
-              isSketch ? 'text-lg font-bold font-sketch' : ''
-            } ${cardStyle === 'bold' ? 'font-extrabold text-[16px]' : ''}`}
+            className={`text-[13.5px] font-bold tracking-tight leading-snug cursor-text break-words ${theme.text} ${
+              isSketch ? 'text-base font-bold font-sketch' : ''
+            } ${cardStyle === 'bold' ? 'font-extrabold text-[14px]' : ''} ${shape === 'diamond' || shape === 'cloud' ? 'text-center' : ''}`}
             title="Double-click or press Space to edit"
           >
             {data.label || 'Untitled Node'}
@@ -542,18 +810,19 @@ export const CustomNode = memo(({ id, data, selected }: CustomNodeProps) => {
 
         {/* High-Contrast Sublabel / description */}
         {data.sublabel && (
-          <p className="text-xs font-medium text-slate-600 dark:text-slate-300 leading-normal">
+          <p className={`text-[11px] font-medium text-slate-500 dark:text-slate-400 leading-snug ${shape === 'diamond' || shape === 'cloud' ? 'text-center' : ''}`}>
             {data.sublabel}
           </p>
         )}
 
         {/* Tags / Pills */}
         {data.tags && data.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-1">
-            {data.tags.map((tag, idx) => (
+          <div className={`flex flex-wrap gap-1 mt-1 max-w-full overflow-hidden ${shape === 'diamond' || shape === 'cloud' ? 'justify-center' : ''}`}>
+            {data.tags.slice(0, 4).map((tag, idx) => (
               <span
                 key={idx}
-                className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-semibold ${
+                title={tag}
+                className={`inline-flex items-center gap-0.5 text-[9.5px] px-1.5 py-0.2 rounded font-semibold max-w-[85px] truncate shrink-0 ${
                   cardStyle === 'bold'
                     ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 font-bold'
                     : cardStyle === 'notion'
@@ -561,10 +830,18 @@ export const CustomNode = memo(({ id, data, selected }: CustomNodeProps) => {
                     : `${theme.tagBg} ${theme.tagText}`
                 }`}
               >
-                <Tag className="w-2.5 h-2.5 opacity-60" />
-                {tag}
+                <Tag className="w-2 h-2 opacity-60 shrink-0" />
+                <span className="truncate">{tag}</span>
               </span>
             ))}
+            {data.tags.length > 4 && (
+              <span
+                title={data.tags.slice(4).join(', ')}
+                className="inline-flex items-center text-[9.5px] px-1 py-0.2 rounded font-bold bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 shrink-0"
+              >
+                +{data.tags.length - 4}
+              </span>
+            )}
           </div>
         )}
       </div>

@@ -21,6 +21,39 @@ const THEME_FILLS: Record<string, { stroke: string; fill: string; bg: string }> 
   cyan: { stroke: '#0891b2', fill: 'rgba(207, 250, 254, 0.5)', bg: '#ecfeff' },
 };
 
+function getRoughCloudPath(w: number, h: number): string {
+  const pad = 6;
+  const width = Math.max(w - pad * 2, 80);
+  const height = Math.max(h - pad * 2, 50);
+  const x = pad;
+  const y = pad;
+
+  const x0 = x;
+  const x1 = x + width * 0.25;
+  const x2 = x + width * 0.5;
+  const x3 = x + width * 0.75;
+  const x4 = x + width;
+
+  const y0 = y;
+  const y1 = y + height * 0.5;
+  const y2 = y + height;
+
+  return `
+    M ${x1},${y0 + 2}
+    C ${x1 - 15},${y0 - 12} ${x0 + 10},${y0 - 8} ${x0 + 12},${y0 + 14}
+    C ${x0 - 14},${y0 + 16} ${x0 - 14},${y1 + 4} ${x0 + 10},${y1 + 10}
+    C ${x0 - 12},${y1 + 16} ${x0 - 6},${y2 + 8} ${x1 - 6},${y2 - 2}
+    C ${x1},${y2 + 14} ${x2 - 10},${y2 + 14} ${x2},${y2 - 2}
+    C ${x2 + 10},${y2 + 14} ${x3},${y2 + 14} ${x3 + 6},${y2 - 2}
+    C ${x4 - 4},${y2 + 10} ${x4 + 14},${y2 + 2} ${x4 - 6},${y1 + 12}
+    C ${x4 + 14},${y1 + 4} ${x4 + 14},${y0 + 16} ${x4 - 10},${y0 + 12}
+    C ${x4 - 8},${y0 - 10} ${x3 + 12},${y0 - 12} ${x3},${y0 + 2}
+    C ${x3 - 10},${y0 - 14} ${x2 + 10},${y0 - 14} ${x2},${y0 + 2}
+    C ${x2 - 10},${y0 - 14} ${x1 + 10},${y0 - 14} ${x1},${y0 + 2}
+    Z
+  `.replace(/\s+/g, ' ').trim();
+}
+
 export const RoughNodeRenderer: React.FC<RoughNodeRendererProps> = ({
   width,
   height,
@@ -74,6 +107,9 @@ export const RoughNodeRenderer: React.FC<RoughNodeRendererProps> = ({
         [padding, h / 2 + padding],
       ];
       shapeNode = rc.polygon(points, options);
+    } else if (shape === 'cloud') {
+      const cloudD = getRoughCloudPath(width, height);
+      shapeNode = rc.path(cloudD, options);
     } else {
       shapeNode = rc.rectangle(padding, padding, w, h, options);
     }

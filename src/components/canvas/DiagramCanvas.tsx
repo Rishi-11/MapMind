@@ -18,7 +18,9 @@ import '@xyflow/react/dist/style.css';
 
 import { MapMindNode, MapMindEdge, CanvasSettings } from '@/types/graph';
 import { CustomNode } from './CustomNode';
+import { CustomEdge } from './CustomEdge';
 import { CANVAS_BACKGROUND_PRESETS } from '@/lib/canvasThemes';
+import { resolveNodeDragCollision } from '@/lib/collision/collisionAvoidance';
 
 interface DiagramCanvasProps {
   nodes: MapMindNode[];
@@ -26,7 +28,9 @@ interface DiagramCanvasProps {
   onNodesChange: OnNodesChange<MapMindNode>;
   onEdgesChange: OnEdgesChange<MapMindEdge>;
   setEdges: React.Dispatch<React.SetStateAction<MapMindEdge[]>>;
+  setNodes: React.Dispatch<React.SetStateAction<MapMindNode[]>>;
   settings: CanvasSettings;
+  selectedEdgeId?: string | null;
   onToggleCollapse: (nodeId: string) => void;
   onToggleLock: (nodeId: string) => void;
   onUpdateNodeLabel: (nodeId: string, label: string) => void;
@@ -35,14 +39,21 @@ interface DiagramCanvasProps {
   onStartEditingNode: (nodeId: string) => void;
   onStopEditingNode: (nodeId: string) => void;
   onSelectNode: (node: MapMindNode | null) => void;
+  onSelectEdge?: (edgeId: string | null) => void;
+  onUpdateEdgeLabel?: (edgeId: string, label: string) => void;
+  onStartEditingEdge?: (edgeId: string) => void;
+  onStopEditingEdge?: (edgeId: string) => void;
   onDeleteNode?: (nodeId: string) => void;
+  onDeleteEdge?: (edgeId: string) => void;
 }
 
 const nodeTypes: NodeTypes = {
   custom: CustomNode,
 };
 
-const edgeTypes: EdgeTypes = {};
+const edgeTypes: EdgeTypes = {
+  custom: CustomEdge,
+};
 
 export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   nodes,
@@ -50,7 +61,9 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   onNodesChange,
   onEdgesChange,
   setEdges,
+  setNodes,
   settings,
+  selectedEdgeId,
   onToggleCollapse,
   onToggleLock,
   onUpdateNodeLabel,
@@ -59,7 +72,12 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   onStartEditingNode,
   onStopEditingNode,
   onSelectNode,
+  onSelectEdge,
+  onUpdateEdgeLabel,
+  onStartEditingEdge,
+  onStopEditingEdge,
   onDeleteNode,
+  onDeleteEdge,
 }) => {
   const zoom = useStore((s) => s.transform[2]);
   const isLOD = zoom < 0.55;
@@ -84,6 +102,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         onSelect: (nodeId: string) => {
           const target = nodes.find((n) => n.id === nodeId) || null;
           onSelectNode(target);
+          onSelectEdge?.(null);
         },
       },
     }));
@@ -99,6 +118,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     onStartEditingNode,
     onStopEditingNode,
     onSelectNode,
+    onSelectEdge,
   ]);
 
   const nodeMap = useMemo(() => {
@@ -107,9 +127,10 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     return map;
   }, [nodes]);
 
-  // Filter visible edges & dynamically compute optimal source/target connection handles
+  // Filter visible edges & dynamically compute optimal source/target handles + dynamic routing
   const visibleEdges = useMemo(() => {
     const visibleNodeIds = new Set(nodes.filter((n) => !n.data?.hidden).map((n) => n.id));
+    const globalRouting = settings.edgeRoutingStyle || 'curved';
 
     return edges
       .filter((e) => visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target))
@@ -150,26 +171,54 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         }
 
         const isDimmed = Boolean(sourceNode?.data?.isDimmed || targetNode?.data?.isDimmed);
+        const isSelected = edge.id === selectedEdgeId;
+        const edgeRouting = edge.data?.routingStyle || globalRouting;
+        const edgeLabel = edge.data?.label || (typeof edge.label === 'string' ? edge.label : undefined);
 
         return {
           ...edge,
           sourceHandle,
           targetHandle,
-          type: 'smoothstep',
+          type: 'custom',
+          selected: isSelected,
+          data: {
+            ...edge.data,
+            label: edgeLabel,
+            routingStyle: edgeRouting,
+            onUpdateLabel: onUpdateEdgeLabel,
+            onStartEditing: onStartEditingEdge,
+            onStopEditing: onStopEditingEdge,
+            onDelete: onDeleteEdge,
+            onSelect: onSelectEdge,
+          },
           style: {
-            strokeWidth: settings.sketchMode ? 2 : isDimmed ? 1 : 1.8,
-            stroke: isDimmed
+            strokeWidth: isSelected ? 2.5 : settings.sketchMode ? 2 : isDimmed ? 1 : 1.8,
+            stroke: isSelected
+              ? '#3b82f6'
+              : isDimmed
               ? '#cbd5e1'
               : settings.sketchMode
               ? '#475569'
               : '#94a3b8',
             opacity: isDimmed ? 0.12 : 1,
-            transition: 'opacity 0.3s ease, stroke 0.3s ease',
+            transition: 'opacity 0.3s ease, stroke 0.3s ease, stroke-width 0.2s ease',
             ...edge.style,
           },
         };
       });
-  }, [edges, nodes, nodeMap, settings.sketchMode]);
+  }, [
+    edges,
+    nodes,
+    nodeMap,
+    settings.sketchMode,
+    settings.edgeRoutingStyle,
+    selectedEdgeId,
+    onUpdateEdgeLabel,
+    onStartEditingEdge,
+    onStopEditingEdge,
+    onDeleteEdge,
+    onSelectEdge,
+  ]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -177,13 +226,30 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         addEdge(
           {
             ...connection,
-            type: 'smoothstep',
+            type: 'custom',
+            data: {
+              routingStyle: settings.edgeRoutingStyle || 'curved',
+            },
           },
           eds
         )
       );
     },
-    [setEdges]
+    [setEdges, settings.edgeRoutingStyle]
+  );
+
+  // Handle Drag Stop with Collision Avoidance
+  const handleNodeDragStop = useCallback(
+    (event: MouseEvent | TouchEvent, node: MapMindNode) => {
+      // Check for collision avoidance setting with manual override (Alt key)
+      const isAltPressed = 'altKey' in event ? event.altKey : false;
+      if (settings.collisionAvoidance && !isAltPressed) {
+        setNodes((currentNodes) => {
+          return resolveNodeDragCollision(node.id, currentNodes);
+        });
+      }
+    },
+    [settings.collisionAvoidance, setNodes]
   );
 
   // Background Theme Config
@@ -206,8 +272,19 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
-        onNodeClick={(_event, node) => onSelectNode(node)}
-        onPaneClick={() => onSelectNode(null)}
+        onNodeDragStop={handleNodeDragStop}
+        onNodeClick={(_event, node) => {
+          onSelectNode(node);
+          onSelectEdge?.(null);
+        }}
+        onEdgeClick={(_event, edge) => {
+          onSelectEdge?.(edge.id);
+          onSelectNode(null);
+        }}
+        onPaneClick={() => {
+          onSelectNode(null);
+          onSelectEdge?.(null);
+        }}
         deleteKeyCode={null}
         onNodesDelete={(deleted) => {
           if (deleted && deleted.length > 0 && onDeleteNode) {
@@ -216,9 +293,17 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         }}
         snapToGrid={settings.gridSnap}
         snapGrid={[settings.gridSize, settings.gridSize]}
-        connectionLineType={ConnectionLineType.SmoothStep}
+        connectionLineType={
+          settings.edgeRoutingStyle === 'straight'
+            ? ConnectionLineType.Straight
+            : settings.edgeRoutingStyle === 'step'
+            ? ConnectionLineType.Step
+            : settings.edgeRoutingStyle === 'smoothstep'
+            ? ConnectionLineType.SmoothStep
+            : ConnectionLineType.Bezier
+        }
         defaultEdgeOptions={{
-          type: 'smoothstep',
+          type: 'custom',
           animated: false,
         }}
         fitView

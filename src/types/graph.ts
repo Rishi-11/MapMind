@@ -37,8 +37,26 @@ export interface CustomNodeData extends Record<string, unknown> {
   locked?: boolean;
 }
 
+export type EdgeRoutingStyle = 'curved' | 'smoothstep' | 'straight' | 'step';
+
+export type LayoutDensity = 'compact' | 'balanced' | 'spacious';
+
+export interface CustomEdgeData extends Record<string, unknown> {
+  label?: string;
+  comment?: string;
+  routingStyle?: EdgeRoutingStyle;
+  isEditing?: boolean;
+  colorTheme?: NodeColorTheme;
+  animated?: boolean;
+  onUpdateLabel?: (edgeId: string, label: string) => void;
+  onStartEditing?: (edgeId: string) => void;
+  onStopEditing?: (edgeId: string) => void;
+  onDelete?: (edgeId: string) => void;
+  onSelect?: (edgeId: string) => void;
+}
+
 export type MapMindNode = Node<CustomNodeData>;
-export type MapMindEdge = Edge;
+export type MapMindEdge = Edge<CustomEdgeData>;
 
 export interface MindMapGraphState {
   nodes: MapMindNode[];
@@ -52,4 +70,7 @@ export interface CanvasSettings {
   gridType: 'dots' | 'lines' | 'cross' | 'none';
   theme: 'light' | 'dark';
   backgroundPreset: CanvasBackgroundPreset;
+  edgeRoutingStyle: EdgeRoutingStyle;
+  layoutDensity: LayoutDensity;
+  collisionAvoidance: boolean;
 }

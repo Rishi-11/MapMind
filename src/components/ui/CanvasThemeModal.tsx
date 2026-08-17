@@ -2,6 +2,8 @@ import React from 'react';
 import {
   CanvasSettings,
   CanvasBackgroundPreset,
+  EdgeRoutingStyle,
+  LayoutDensity,
 } from '@/types/graph';
 import { CANVAS_BACKGROUND_PRESETS } from '@/lib/canvasThemes';
 import {
@@ -16,6 +18,13 @@ import {
   EyeOff,
   Sun,
   Moon,
+  Spline,
+  CornerDownRight,
+  Minus,
+  Shield,
+  Layers,
+  Minimize2,
+  Maximize2,
 } from 'lucide-react';
 
 interface CanvasThemeModalProps {
@@ -37,6 +46,29 @@ const GRID_OPTIONS: {
   { id: 'none', label: 'Blank Canvas', desc: 'Distraction-free blank', icon: EyeOff },
 ];
 
+const ROUTING_OPTIONS: {
+  id: EdgeRoutingStyle;
+  label: string;
+  desc: string;
+  icon: React.ComponentType<{ className?: string }>;
+}[] = [
+  { id: 'curved', label: 'Curved (Flow)', desc: 'Organic smooth bezier spline', icon: Spline },
+  { id: 'smoothstep', label: 'Smooth Step', desc: 'Modern rounded corners', icon: CornerDownRight },
+  { id: 'straight', label: 'Straight Line', desc: 'Crisp direct connection', icon: Minus },
+  { id: 'step', label: 'Right Angle', desc: 'Sharp orthogonal steps', icon: CornerDownRight },
+];
+
+const DENSITY_OPTIONS: {
+  id: LayoutDensity;
+  label: string;
+  desc: string;
+  icon: React.ComponentType<{ className?: string }>;
+}[] = [
+  { id: 'compact', label: 'Compact', desc: 'High density, minimal whitespace', icon: Minimize2 },
+  { id: 'balanced', label: 'Balanced', desc: 'Standard comfortable spacing', icon: Layers },
+  { id: 'spacious', label: 'Spacious', desc: 'Airy presentation layout', icon: Maximize2 },
+];
+
 export const CanvasThemeModal: React.FC<CanvasThemeModalProps> = ({
   isOpen,
   onClose,
@@ -49,7 +81,7 @@ export const CanvasThemeModal: React.FC<CanvasThemeModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xl w-full max-w-xl p-6 max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-700">
           <div className="flex items-center gap-2.5">
@@ -58,10 +90,10 @@ export const CanvasThemeModal: React.FC<CanvasThemeModalProps> = ({
             </div>
             <div>
               <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
-                Canvas Background & Mood
+                Canvas & Diagram Customization
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Customize canvas paper tones, reading contrast, and grid patterns
+                Customize routing lines, spacing density, collision avoidance, and canvas mood
               </p>
             </div>
           </div>
@@ -73,8 +105,102 @@ export const CanvasThemeModal: React.FC<CanvasThemeModalProps> = ({
           </button>
         </div>
 
-        <div className="py-4 space-y-5">
-          {/* 1. Background Color Moods */}
+        <div className="py-4 space-y-6">
+          {/* 1. Connection Lines & Dynamic Routing */}
+          <div>
+            <label className="block text-xs font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <Spline className="w-3.5 h-3.5 text-blue-500" />
+              Connection Line Routing Style
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {ROUTING_OPTIONS.map((opt) => {
+                const isSelected = (settings.edgeRoutingStyle || 'curved') === opt.id;
+                const Icon = opt.icon;
+
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => onUpdateSettings({ edgeRoutingStyle: opt.id })}
+                    className={`flex flex-col items-center justify-center p-3 rounded-xl border text-center transition-all ${
+                      isSelected
+                        ? 'border-blue-500 bg-blue-50/80 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 ring-2 ring-blue-500/20 shadow-xs font-semibold'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-750'
+                    }`}
+                  >
+                    <Icon className="w-4 h-4 mb-1 text-indigo-500" />
+                    <span className="text-xs font-bold">{opt.label}</span>
+                    <span className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 leading-tight">
+                      {opt.desc}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 2. Layout Spacing Density */}
+          <div>
+            <label className="block text-xs font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <Minimize2 className="w-3.5 h-3.5 text-emerald-500" />
+              Layout Spacing Density
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {DENSITY_OPTIONS.map((opt) => {
+                const isSelected = (settings.layoutDensity || 'compact') === opt.id;
+                const Icon = opt.icon;
+
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => onUpdateSettings({ layoutDensity: opt.id })}
+                    className={`flex flex-col items-center justify-center p-3 rounded-xl border text-center transition-all ${
+                      isSelected
+                        ? 'border-emerald-500 bg-emerald-50/80 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 ring-2 ring-emerald-500/20 shadow-xs font-semibold'
+                        : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-750'
+                    }`}
+                  >
+                    <Icon className="w-4 h-4 mb-1 text-emerald-500" />
+                    <span className="text-xs font-bold">{opt.label}</span>
+                    <span className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 leading-tight">
+                      {opt.desc}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 3. Smart Collision Avoidance */}
+          <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/60 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400">
+                  <Shield className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                    Smart Collision Avoidance
+                  </div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Prevents elements from overlapping by auto-nudging when moved
+                  </div>
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={settings.collisionAvoidance}
+                onChange={(e) => onUpdateSettings({ collisionAvoidance: e.target.checked })}
+                className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
+              />
+            </div>
+            <p className="text-[10px] text-slate-500 dark:text-slate-400 italic bg-white/70 dark:bg-slate-800/70 p-2 rounded-lg border border-slate-200/50 dark:border-slate-700/50">
+              💡 <strong>Manual Override:</strong> You can always hold the <kbd className="px-1.5 py-0.5 font-mono text-[10px] bg-slate-200 dark:bg-slate-700 rounded font-bold">Alt</kbd> key while dragging to intentionally overlap elements regardless of this setting.
+            </p>
+          </div>
+
+          {/* 4. Background Color Moods */}
           <div>
             <div className="flex items-center justify-between mb-2">
               <label className="text-xs font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wider flex items-center gap-1.5">
@@ -134,11 +260,6 @@ export const CanvasThemeModal: React.FC<CanvasThemeModalProps> = ({
                       <div>
                         <div className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
                           {preset.name}
-                          {preset.id === 'warm' && (
-                            <span className="text-[9px] font-semibold uppercase px-1.5 py-0.2 rounded bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200">
-                              Warm
-                            </span>
-                          )}
                         </div>
                         <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
                           {preset.desc}
@@ -152,7 +273,7 @@ export const CanvasThemeModal: React.FC<CanvasThemeModalProps> = ({
             </div>
           </div>
 
-          {/* 2. Grid Style Pattern */}
+          {/* 5. Grid Style Pattern */}
           <div>
             <label className="block text-xs font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wider mb-2 flex items-center gap-1.5">
               <Grid className="w-3.5 h-3.5 text-blue-500" />
@@ -182,7 +303,7 @@ export const CanvasThemeModal: React.FC<CanvasThemeModalProps> = ({
             </div>
           </div>
 
-          {/* 3. Grid Snap & Density */}
+          {/* 6. Grid Snap */}
           <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/60 space-y-3">
             <div className="flex items-center justify-between">
               <div>
@@ -200,30 +321,6 @@ export const CanvasThemeModal: React.FC<CanvasThemeModalProps> = ({
                 className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 cursor-pointer"
               />
             </div>
-
-            {settings.gridType !== 'none' && (
-              <div className="pt-2 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between gap-4">
-                <div className="text-xs font-medium text-slate-700 dark:text-slate-300">
-                  Grid Spacing
-                </div>
-                <div className="flex items-center gap-1.5">
-                  {[15, 20, 25, 30].map((size) => (
-                    <button
-                      key={size}
-                      type="button"
-                      onClick={() => onUpdateSettings({ gridSize: size })}
-                      className={`text-xs px-2.5 py-1 rounded-lg font-medium border transition-colors ${
-                        settings.gridSize === size
-                          ? 'bg-blue-600 text-white border-blue-600'
-                          : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      {size}px
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </div>
 
@@ -231,7 +328,7 @@ export const CanvasThemeModal: React.FC<CanvasThemeModalProps> = ({
         <div className="pt-4 border-t border-slate-100 dark:border-slate-700 flex justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-xs font-semibold bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 rounded-xl hover:opacity-90 transition-opacity"
+            className="px-4 py-2 text-xs font-semibold bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 rounded-xl hover:opacity-90 transition-opacity cursor-pointer"
           >
             Apply & Done
           </button>

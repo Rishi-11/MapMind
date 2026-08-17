@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MapMindNode, NodeColorTheme, NodeShape, NodeCardStyle } from '@/types/graph';
+import { MapMindNode, MapMindEdge, NodeColorTheme, NodeShape, NodeCardStyle } from '@/types/graph';
 import {
   Tag,
   Trash2,
@@ -17,11 +17,14 @@ import {
   LayoutTemplate,
   Bookmark,
   Shapes,
+  Cloud,
 } from 'lucide-react';
 
 interface NodeInspectorProps {
   selectedNode: MapMindNode | null;
+  incomingEdge?: MapMindEdge | null;
   onUpdateNode: (nodeId: string, updates: Partial<MapMindNode['data']>) => void;
+  onUpdateEdgeLabel?: (edgeId: string, label: string) => void;
   onDeleteNode: (nodeId: string) => void;
   onClose: () => void;
 }
@@ -94,7 +97,7 @@ const SHAPE_OPTIONS: {
 }[] = [
   { id: 'card', label: 'Card', icon: Square },
   { id: 'pill', label: 'Pill', icon: Circle },
-  { id: 'cloud', label: 'Cloud', icon: Sparkle },
+  { id: 'cloud', label: 'Cloud', icon: Cloud },
   { id: 'sharp', label: 'Sharp', icon: Square },
   { id: 'banner', label: 'Banner', icon: Bookmark },
   { id: 'diamond', label: 'Diamond', icon: Diamond },
@@ -102,7 +105,9 @@ const SHAPE_OPTIONS: {
 
 export const NodeInspector: React.FC<NodeInspectorProps> = ({
   selectedNode,
+  incomingEdge,
   onUpdateNode,
+  onUpdateEdgeLabel,
   onDeleteNode,
   onClose,
 }) => {
@@ -335,18 +340,19 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
           <label className="block text-[11px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
             Tags
           </label>
-          <div className="flex flex-wrap gap-1 mb-2">
+          <div className="flex flex-wrap gap-1 mb-2 max-h-28 overflow-y-auto pr-1">
             {currentTags.map((tag, idx) => (
               <span
                 key={idx}
-                className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium"
+                title={tag}
+                className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium max-w-[140px] shrink-0"
               >
-                <Tag className="w-2.5 h-2.5 opacity-50" />
-                {tag}
+                <Tag className="w-2.5 h-2.5 opacity-50 shrink-0" />
+                <span className="truncate">{tag}</span>
                 <button
                   type="button"
                   onClick={() => handleRemoveTag(idx)}
-                  className="hover:text-red-500 transition-colors ml-0.5"
+                  className="hover:text-red-500 transition-colors ml-0.5 shrink-0"
                 >
                   <X className="w-2.5 h-2.5" />
                 </button>
@@ -369,6 +375,29 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
             </button>
           </form>
         </div>
+
+        {/* 7. Incoming Connection Label & Path Style (if not root) */}
+        {incomingEdge && (
+          <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-900/70 space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                Connection Comment / Label
+              </label>
+              <span className="text-[10px] text-slate-400 font-mono">
+                Press 'e' on node
+              </span>
+            </div>
+            <input
+              type="text"
+              value={incomingEdge.data?.label || ''}
+              onChange={(e) =>
+                onUpdateEdgeLabel?.(incomingEdge.id, e.target.value)
+              }
+              placeholder="Path condition, e.g. 'requires' or 'yes'..."
+              className="w-full text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-blue-500"
+            />
+          </div>
+        )}
       </div>
 
       {/* Delete button */}
