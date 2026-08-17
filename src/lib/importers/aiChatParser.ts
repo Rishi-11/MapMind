@@ -1,4 +1,4 @@
-import { MapMindNode, MapMindEdge, NodeColorTheme } from '@/types/graph';
+import { MapMindNode, MapMindEdge, NodeColorTheme, NodeShape, NodeCardStyle } from '@/types/graph';
 
 export interface ParsedMindMapResult {
   nodes: MapMindNode[];
@@ -26,71 +26,146 @@ export interface AiPromptTemplate {
 
 export const AI_PROMPT_TEMPLATES: AiPromptTemplate[] = [
   {
-    id: 'chat-summary',
-    title: '💬 Summarize Chat / Discussion',
-    description: 'Transform our ongoing chat conversation into a structured mind map',
-    prompt: `Please convert our entire discussion above into a clean, hierarchical Mind Map in Markdown bullet-point format for MapMind diagramming:
+    id: 'educational-textbook',
+    title: '🎓 Master Educational Map ("Compressed Textbook")',
+    description: 'Deeply teaches and explains concepts, mechanisms, causes, effects, and outcomes',
+    prompt: `I want you to create an Educational Mind Map for MapMind that EXPLAINS and TEACHES the topic: "[REPLACE WITH YOUR TOPIC]", not merely lists its subtopics.
 
-Instructions:
-1. Use "# [Main Central Topic]" as the root header.
-2. Use indented bullet points (- Level 1, -- Level 2, --- Level 3, etc.) for branches and subtopics.
-3. You can attach tags in square brackets, e.g. "- Performance [Core]" or "- SQLite [Database]".
-4. You can add brief descriptions after a colon, e.g. "- Vite: High performance frontend bundler".
-5. Group ideas logically with 3 to 6 main high-level branches.
+The biggest requirement is:
+DO NOT generate a collection of short bullet points or mere keywords.
+Every important branch must explain the idea behind it, its purpose, how it works, and how it connects to the parent topic.
+Think of the Mind Map as a "compressed textbook" rather than a "table of contents".
 
-Output ONLY the Markdown bullet-point outline inside a code block.`,
-  },
-  {
-    id: 'brainstorm',
-    title: '🧠 Brainstorm & Expand Topic',
-    description: 'Generate a comprehensive, deep mind map on any concept or project idea',
-    prompt: `Act as a Knowledge Architect. I want a comprehensive, structured Mind Map on the topic: "[REPLACE WITH YOUR TOPIC]".
+For every major concept, address:
+- What is it?
+- Why is it important?
+- How does it work?
+- How does it relate to the parent concept?
+- What happens next?
+- What are the possible outcomes?
+- Are there exceptions or special cases?
+- Can a simple practical example make it clearer?
 
-Instructions:
-1. Start with "# [Topic Name]" as the central root.
-2. Break it down into 4 to 6 main pillar branches (e.g. Overview, Key Features, Architecture, Use Cases, Challenges, Next Steps).
-3. Under each pillar, expand 2 to 4 detailed sub-branches.
-4. Add tags in brackets like [Strategy], [Tech], [Priority].
-5. Format strictly as an indented Markdown bullet-point list.
+Use the hierarchy to explain relationships and reasoning:
+- Concept → Explanation
+- Cause → Effect
+- Input → Process → Output
+- Question → Decision → Consequence
+- Problem → Solution
+- Component → Function
+- Step → Result
+- Rule → Exception
+- Concept → Example
 
-Output ONLY the markdown list inside a code block.`,
-  },
-  {
-    id: 'article-summary',
-    title: '📑 Summarize Notes / Meeting / Article',
-    description: 'Distill lengthy text, meeting notes, or documentation into key insights',
-    prompt: `Please summarize the following text/meeting notes into an organized Mind Map:
+MapMind Feature Formatting Syntax:
+1. Root Header: "# [Central Topic Name]"
+2. Hierarchy: Use indented dashes (- Level 1, -- Level 2, --- Level 3, etc.)
+3. Explanations: "Node Title [Tag1, Tag2] : Detailed explanation of what it is, why it matters, and how it works"
+4. Connection Comments / Flow Labels (optional): Put relationship or condition in arrows: "-- (leads to) --> Child Title : Explanation" or "-- (on success) --> Outcome Title"
+5. Node Shapes (optional): append {diamond} for decisions/conditions, {cloud} for theories/ideas, {banner} for milestones, {pill} for categories.
+6. Card Aesthetic Styles (optional): {style: bold}, {style: classy}, {style: gradient}, {style: notion}.
 
-[PASTE YOUR NOTES / ARTICLE HERE]
+DEPTH RULE:
+Do not stop after naming a concept. Expand it until the reader can understand the concept from the Mind Map itself. A good node should contain enough information to answer "What does this mean?" without requiring a separate explanation.
 
-Instructions:
-1. Use "# [Subject / Meeting Title]" as the central root node.
-2. Identify the main themes: Agenda/Topics, Key Decisions, Action Items, Ideas, Questions.
-3. Structure as a clean indented Markdown bullet-point list with tags like [Action], [Decision], [Key].
-4. Keep node titles concise (3-7 words) and punchy.
+Example:
+# User Authentication Architecture
+- Authentication Engine [Security] : Process of verifying that a user is really who they claim to be
+-- Purpose [Defense] : Prevents unauthorized actors from accessing private tenant data
+-- Credentials Intake [Input] : User provides an identifier and secret such as email and cryptographic password
+--- (submits to) --> Verification Logic {diamond} [Evaluation] : Checks supplied hash against stored PBKDF2/Argon2 salt
+---- (on valid match) --> Session Generated [Outcome] : Issues signed JWT access token for persistent state
+---- (on mismatch) --> Access Rejected [Outcome] : Returns 401 Unauthorized and increments failed attempt counter
+-- Multi-Factor OTP [Defense-in-Depth] : Generates ephemeral 6-digit TOTP code refreshed every 30 seconds
+--- Why Used [Risk Mitigation] : Protects the user account even if primary password was leaked in a breach
 
 Output ONLY the Markdown list inside a code block.`,
   },
   {
     id: 'tech-architecture',
-    title: '🏗️ Technical Architecture Breakdown',
-    description: 'Map out system components, frontend/backend stack, APIs, and data flows',
-    prompt: `Please generate a Technical Architecture Mind Map for: "[REPLACE WITH YOUR TECH SYSTEM/PROJECT]".
+    title: '🏗️ Technical Architecture & System Design',
+    description: 'Detailed system components, protocols, data flows, caching, and failure modes',
+    prompt: `Act as a Principal Software Architect. I want a comprehensive, educational Technical Architecture Mind Map for: "[REPLACE WITH YOUR SYSTEM / TECH STACK]".
 
 Instructions:
-1. Root node: "# [System / Project Name]"
-2. Main branches: Frontend / Client, Backend / APIs, Database & Storage, DevOps & Infra, Security, Integrations.
-3. Sub-nodes: Libraries, protocols, components, tools.
-4. Add relevant tags like [React], [Node], [Auth], [Postgres].
-5. Format strictly as an indented Markdown bullet-point list.
+1. Explain how components interact instead of simply naming technologies.
+2. Structure into: Client / Presentation, API Gateway & Routing, Business Microservices, Data Storage & Caching, Event Streaming, Security & Auth, Infrastructure & Reliability.
+3. For every service/database, explain its core responsibility, protocol/data flow, why it was chosen, and how failures are mitigated.
+4. Use connection comments for protocols and data flows, e.g. "-- (via gRPC) --> Order Service", "-- (publishes event) --> Kafka Cluster", "-- (fallback query) --> Replica DB".
+5. Use tags like [React], [PostgreSQL], [Redis], [Docker], [Security].
 
-Output ONLY the Markdown outline inside a code block.`,
+Output ONLY the Markdown list inside a code block.`,
+  },
+  {
+    id: 'process-workflow',
+    title: '🔄 Step-by-Step Process & Pipeline Engine',
+    description: 'Sequenced execution steps, mechanisms, inputs/outputs, and decision branches',
+    prompt: `Act as a Systems Analyst. Generate an educational, step-by-step Process Workflow Mind Map for: "[REPLACE WITH YOUR PROCESS / WORKFLOW]".
+
+Instructions:
+1. Show the actual chronological sequence and explain what happens at each step.
+2. For each step, explain:
+   - What triggers it (Input)
+   - How it is processed (Mechanism)
+   - What happens next (Output / Next Step)
+3. Include Decision Points using {diamond} nodes with branching outcomes:
+   -- (if approved) --> Next Stage : Description of next phase
+   -- (if rejected) --> Rollback / Notification : Description of remediation
+4. Include Exception handling: normal path vs fallback path.
+
+Output ONLY the Markdown list inside a code block.`,
+  },
+  {
+    id: 'decision-tree',
+    title: '⚖️ Decision Tree & Consequence Matrix',
+    description: 'Strategic evaluations, conditional branches, trade-offs, and contingency plans',
+    prompt: `Act as a Strategic Decision Analyst. Generate an educational Decision Tree Mind Map for: "[REPLACE WITH YOUR PROBLEM / DECISION]".
+
+Instructions:
+1. Start with the core problem or evaluation in root "# [Problem Statement]".
+2. Branch into the primary evaluation criteria and risk factors.
+3. For each decision, use {diamond} shape nodes with conditional connection labels:
+   -- (Option A: High Scale / Complex) --> Microservices Architecture : Trade-offs and resource requirements
+   -- (Option B: Fast MVP / Simple) --> Modular Monolith : Trade-offs and launch timeline
+4. Expand consequences, trade-offs, financial/technical costs, and contingency plans for each path.
+
+Output ONLY the Markdown list inside a code block.`,
+  },
+  {
+    id: 'scientific-deepdive',
+    title: '🔬 Scientific & Conceptual Deep-Dive',
+    description: 'Underlying mechanisms, cause-and-effect chains, experiments, and applications',
+    prompt: `Act as a Professor and Research Scientist. Generate an explanatory Conceptual Deep-Dive Mind Map for: "[REPLACE WITH YOUR SCIENTIFIC / ACADEMIC TOPIC]".
+
+Instructions:
+1. Organise into: Fundamentals & Principles, Underlying Mechanisms, Causes & Effects, Milestone Experiments / Evidence, Practical Applications, Open Questions / Limitations.
+2. Connect abstract theories with concrete physical/biological/mathematical mechanisms.
+3. Ensure every branch answers "What is it?" and "How does it work?".
+4. Use tags like [Theory], [Mechanism], [Evidence], [Application].
+
+Output ONLY the Markdown list inside a code block.`,
+  },
+  {
+    id: 'notes-distiller',
+    title: '📑 Distill Notes, Transcript or Document',
+    description: 'Distill lengthy text into an educational, organized, and actionable knowledge map',
+    prompt: `Please convert the following text/meeting notes into an educational, deeply structured Mind Map for MapMind:
+
+[PASTE YOUR NOTES / ARTICLE / TRANSCRIPT HERE]
+
+Instructions:
+1. Extract the core ideas and explain the context, reasoning, and decisions behind them.
+2. Group into: Context & Problem, Key Insights, Decisions Made, Action Items (Owner + Deadline), Unresolved Questions.
+3. Use connection comments for dependencies: "-- (depends on) --> Task X", "-- (leads to) --> Decision Y".
+4. Add tags like [Decision], [Action], [Insight], [Blocked].
+
+Output ONLY the Markdown list inside a code block.`,
   },
 ];
 
 /**
  * Intelligent Parser that converts raw AI chat response (Markdown outline, Mermaid mindmap, or JSON)
- * into MapMind graph nodes and edges.
+ * into MapMind graph nodes and edges with support for connection comments, shapes, styles, and tags.
  */
 export function parseAiResponseToMindMap(rawText: string): ParsedMindMapResult {
   const cleanText = extractContentFromCodeBlocks(rawText).trim();
@@ -134,12 +209,14 @@ interface OutlineItem {
   label: string;
   sublabel?: string;
   tags?: string[];
-  parentId?: string;
-  colorTheme?: NodeColorTheme;
+  shape?: NodeShape;
+  cardStyle?: NodeCardStyle;
+  explicitTheme?: NodeColorTheme;
+  edgeLabel?: string;
 }
 
 /**
- * Parses indented Markdown bullet points, numbers, and headers into a mind map
+ * Parses indented Markdown bullet points, numbers, connection arrows, shapes, styles, and headers into a mind map
  */
 function parseMarkdownOutlineToMindMap(text: string): ParsedMindMapResult {
   const lines = text
@@ -167,14 +244,29 @@ function parseMarkdownOutlineToMindMap(text: string): ParsedMindMapResult {
 
   const items: OutlineItem[] = [];
   let rootTitle = 'Central Topic';
+  let rootSublabel: string | undefined = undefined;
+  let rootTags: string[] | undefined = undefined;
 
   lines.forEach((rawLine, lineIndex) => {
-    const line = rawLine;
+    let line = rawLine;
 
     // Check for root Markdown header (# Topic)
     const headerMatch = line.match(/^(#{1,6})\s+(.*)$/);
     if (headerMatch && lineIndex === 0) {
-      rootTitle = headerMatch[2].trim();
+      let hContent = headerMatch[2].trim();
+      // Extract tags in root
+      const hTags = hContent.match(/\[([^[\]]+)\]/g);
+      if (hTags) {
+        rootTags = hTags.map((t) => t.replace(/[[\]]/g, '').trim());
+        hContent = hContent.replace(/\[([^[\]]+)\]/g, '').trim();
+      }
+      if (hContent.includes(':') && !hContent.startsWith('http')) {
+        const parts = hContent.split(':');
+        rootTitle = parts[0].trim();
+        rootSublabel = parts.slice(1).join(':').trim();
+      } else {
+        rootTitle = hContent;
+      }
       return;
     }
 
@@ -182,24 +274,70 @@ function parseMarkdownOutlineToMindMap(text: string): ParsedMindMapResult {
     const leadingWhitespaceMatch = line.match(/^(\s*)/);
     const leadingSpaces = leadingWhitespaceMatch ? leadingWhitespaceMatch[1].length : 0;
     const tabCount = (line.match(/^\t+/) || [''])[0].length;
-    const computedDepth = tabCount > 0 ? tabCount + 1 : Math.floor(leadingSpaces / 2) + 1;
+    
+    // Check if user used multi-dash hierarchy like -- Level 2, --- Level 3
+    const multiDashMatch = line.trim().match(/^(-{2,6}|\+{2,6})\s+/);
+    let computedDepth: number;
+    if (multiDashMatch) {
+      computedDepth = multiDashMatch[1].length;
+    } else if (tabCount > 0) {
+      computedDepth = tabCount + 1;
+    } else {
+      computedDepth = Math.floor(leadingSpaces / 2) + 1;
+    }
 
-    // Strip bullet symbol (- , * , + , 1. , etc.)
-    const cleanContent = line.replace(/^\s*([*+\-•–—]|\d+[.)])\s+/, '').trim();
+    // Strip bullet symbol (- , * , + , -- , --- , 1. , etc.)
+    let cleanContent = line
+      .replace(/^\s*(-{1,6}|\+{1,6}|[*•–—]|\d+[.)])\s+/, '')
+      .trim();
     if (!cleanContent) return;
 
-    // Extract tags in [Tag] or (Tag)
+    // 1. Extract Connection Comments / Edge Labels:
+    // e.g. (leads to) --> Child  OR  [on success] --> Child  OR  {if valid} --> Child  OR  -- leads to --> Child
+    let edgeLabel: string | undefined = undefined;
+    const edgeArrowMatch = cleanContent.match(/^(?:--|\+\+|->)?\s*(?:[({[]\s*([^{}\[\]()]+?)\s*[)}\]]|([a-zA-Z0-9\s_/-]+?))\s*(?:-->|->|=>)\s*(.*)$/);
+    if (edgeArrowMatch) {
+      edgeLabel = (edgeArrowMatch[1] || edgeArrowMatch[2])?.trim();
+      cleanContent = edgeArrowMatch[3].trim();
+    }
+
+    // 2. Extract Shape: {diamond}, {cloud}, {banner}, {pill}, {sharp}, {card}
+    let shape: NodeShape | undefined = undefined;
+    const shapeMatch = cleanContent.match(/\{(?:shape\s*:\s*)?(diamond|cloud|banner|pill|sharp|card)\}/i);
+    if (shapeMatch) {
+      shape = shapeMatch[1].toLowerCase() as NodeShape;
+      cleanContent = cleanContent.replace(shapeMatch[0], '').trim();
+    }
+
+    // 3. Extract Card Aesthetic Style: {style: bold}, {style: classy}, {style: gradient}, {style: minimal}, {style: notion}
+    let cardStyle: NodeCardStyle | undefined = undefined;
+    const styleMatch = cleanContent.match(/\{(?:style\s*:\s*)?(bold|classy|gradient|minimal|notion|default)\}/i);
+    if (styleMatch) {
+      cardStyle = styleMatch[1].toLowerCase() as NodeCardStyle;
+      cleanContent = cleanContent.replace(styleMatch[0], '').trim();
+    }
+
+    // 4. Extract Explicit Theme: {theme: blue}, {theme: emerald}, etc.
+    let explicitTheme: NodeColorTheme | undefined = undefined;
+    const themeMatch = cleanContent.match(/\{(?:theme\s*:\s*|color\s*:\s*)?(blue|emerald|purple|amber|rose|cyan|slate)\}/i);
+    if (themeMatch) {
+      explicitTheme = themeMatch[1].toLowerCase() as NodeColorTheme;
+      cleanContent = cleanContent.replace(themeMatch[0], '').trim();
+    }
+
+    // 5. Extract Tags in [Tag]
     const tags: string[] = [];
     const tagMatches = cleanContent.match(/\[([^[\]]+)\]/g);
     if (tagMatches) {
       tagMatches.forEach((t) => {
-        tags.push(t.replace(/[[\]]/g, '').trim());
+        const tagText = t.replace(/[[\]]/g, '').trim();
+        if (tagText) tags.push(tagText);
       });
     }
 
     let textWithoutTags = cleanContent.replace(/\[([^[\]]+)\]/g, '').trim();
 
-    // Extract sublabel / description if colon or dash separator exists
+    // 6. Extract Label & Explanatory Sublabel
     let label = textWithoutTags;
     let sublabel: string | undefined = undefined;
 
@@ -207,7 +345,7 @@ function parseMarkdownOutlineToMindMap(text: string): ParsedMindMapResult {
       const parts = textWithoutTags.split(':');
       label = parts[0].trim();
       sublabel = parts.slice(1).join(':').trim();
-    } else if (textWithoutTags.includes(' - ')) {
+    } else if (textWithoutTags.includes(' - ') && !textWithoutTags.includes('-->')) {
       const parts = textWithoutTags.split(' - ');
       label = parts[0].trim();
       sublabel = parts.slice(1).join(' - ').trim();
@@ -219,6 +357,10 @@ function parseMarkdownOutlineToMindMap(text: string): ParsedMindMapResult {
       label: label || 'Subtopic',
       sublabel: sublabel || undefined,
       tags: tags.length > 0 ? tags : undefined,
+      shape,
+      cardStyle,
+      explicitTheme,
+      edgeLabel,
     });
   });
 
@@ -234,8 +376,11 @@ function parseMarkdownOutlineToMindMap(text: string): ParsedMindMapResult {
     selected: true,
     data: {
       label: rootTitle,
+      sublabel: rootSublabel,
+      tags: rootTags,
       colorTheme: 'blue',
       isRoot: true,
+      shape: 'pill',
       cardStyle: 'default',
     },
   });
@@ -257,7 +402,9 @@ function parseMarkdownOutlineToMindMap(text: string): ParsedMindMapResult {
     const isDirectChildOfRoot = parent.id === rootId;
 
     let branchColor: NodeColorTheme;
-    if (isDirectChildOfRoot) {
+    if (item.explicitTheme) {
+      branchColor = item.explicitTheme;
+    } else if (isDirectChildOfRoot) {
       branchColor = COLOR_PALETTE_ORDER[mainBranchCounter % COLOR_PALETTE_ORDER.length];
       mainBranchCounter++;
     } else {
@@ -270,21 +417,24 @@ function parseMarkdownOutlineToMindMap(text: string): ParsedMindMapResult {
     nodes.push({
       id: item.id,
       type: 'custom',
-      position: { x: 0, y: 0 }, // Will be placed by ELK / Dagre
+      position: { x: 0, y: 0 }, // Will be arranged by ELK layout
       data: {
         label: item.label,
         sublabel: item.sublabel,
         tags: item.tags,
         colorTheme: branchColor,
+        shape: item.shape || (isDirectChildOfRoot ? 'card' : undefined),
+        cardStyle: item.cardStyle || 'default',
       },
     });
 
-    // Add edge
+    // Add edge with optional connection label / comment
     edges.push({
       id: `e_${parent.id}_${item.id}`,
       source: parent.id,
       target: item.id,
       type: 'custom',
+      data: item.edgeLabel ? { label: item.edgeLabel } : undefined,
     });
 
     stack.push({
@@ -303,11 +453,7 @@ function parseMarkdownOutlineToMindMap(text: string): ParsedMindMapResult {
 }
 
 /**
- * Parses Mermaid Mindmap syntax:
- * mindmap
- *   root((Central Topic))
- *     Branch 1
- *       Leaf A
+ * Parses Mermaid Mindmap syntax with shape & connection extraction
  */
 function parseMermaidMindmap(text: string): ParsedMindMapResult {
   const lines = text
@@ -337,18 +483,39 @@ function parseMermaidMindmap(text: string): ParsedMindMapResult {
       return;
     }
 
-    // Clean node label shapes: ((Label)), [Label], (Label), )Label(
-    const cleanLabel = raw
+    // Extract shape from mermaid syntax
+    let shape: NodeShape | undefined = undefined;
+    if (/^\{\{.*?\}\}$/.test(raw) || /^\{.*?\}$/.test(raw)) {
+      shape = 'diamond';
+    } else if (/^\)\(.*?\)|\(\(.*?\)\)$/.test(raw)) {
+      shape = 'pill';
+    } else if (/^\]\s*.*?\s*\[$/.test(raw)) {
+      shape = 'banner';
+    }
+
+    // Clean node label shapes: ((Label)), [Label], (Label), {Label}
+    let cleanLabel = raw
+      .replace(/^\{\{(.*?)\}\}$/, '$1')
+      .replace(/^\{(.*?)\}$/, '$1')
       .replace(/^\(\((.*?)\)\)$/, '$1')
       .replace(/^\[(.*?)\]$/, '$1')
       .replace(/^\((.*?)\)$/, '$1')
-      .replace(/^\)(.*?)\($/, '$1')
       .trim();
+
+    // Extract sublabels if present
+    let sublabel: string | undefined = undefined;
+    if (cleanLabel.includes(':')) {
+      const parts = cleanLabel.split(':');
+      cleanLabel = parts[0].trim();
+      sublabel = parts.slice(1).join(':').trim();
+    }
 
     items.push({
       id: `mm_node_${idx}_${Math.random().toString(36).substring(2, 6)}`,
       depth,
       label: cleanLabel || 'Subtopic',
+      sublabel,
+      shape,
     });
   });
 
@@ -357,7 +524,7 @@ function parseMermaidMindmap(text: string): ParsedMindMapResult {
     type: 'custom',
     position: { x: 0, y: 0 },
     selected: true,
-    data: { label: rootLabel, isRoot: true, colorTheme: 'blue' },
+    data: { label: rootLabel, isRoot: true, colorTheme: 'blue', shape: 'pill' },
   });
 
   const stack: { depth: number; id: string }[] = [{ depth: 0, id: rootId }];
@@ -387,7 +554,9 @@ function parseMermaidMindmap(text: string): ParsedMindMapResult {
       position: { x: 0, y: 0 },
       data: {
         label: item.label,
+        sublabel: item.sublabel,
         colorTheme: branchColor,
+        shape: item.shape,
       },
     });
 
@@ -410,7 +579,7 @@ function parseMermaidMindmap(text: string): ParsedMindMapResult {
 }
 
 /**
- * Parses nested JSON structure: { "label": "Root", "children": [...] }
+ * Parses nested JSON structure: { "label": "Root", "sublabel": "...", "children": [...] }
  */
 function parseJsonTree(json: any): ParsedMindMapResult {
   const rootId = `root_${Date.now()}`;
@@ -425,7 +594,15 @@ function parseJsonTree(json: any): ParsedMindMapResult {
     type: 'custom',
     position: { x: 0, y: 0 },
     selected: true,
-    data: { label: rootLabel, isRoot: true, colorTheme: 'blue' },
+    data: {
+      label: rootLabel,
+      sublabel: rootData?.sublabel || rootData?.description,
+      tags: rootData?.tags,
+      isRoot: true,
+      colorTheme: 'blue',
+      shape: 'pill',
+      cardStyle: rootData?.cardStyle || 'default',
+    },
   });
 
   let branchCounter = 0;
@@ -439,7 +616,9 @@ function parseJsonTree(json: any): ParsedMindMapResult {
       const isDirectChild = parentId === rootId;
 
       let colorTheme: NodeColorTheme;
-      if (isDirectChild) {
+      if (child.colorTheme && COLOR_PALETTE_ORDER.includes(child.colorTheme)) {
+        colorTheme = child.colorTheme;
+      } else if (isDirectChild) {
         colorTheme = COLOR_PALETTE_ORDER[branchCounter % COLOR_PALETTE_ORDER.length];
         branchCounter++;
       } else {
@@ -457,14 +636,18 @@ function parseJsonTree(json: any): ParsedMindMapResult {
           sublabel: child.sublabel || child.desc || child.description,
           tags: child.tags,
           colorTheme,
+          shape: child.shape,
+          cardStyle: child.cardStyle || 'default',
         },
       });
 
+      const edgeLabel = child.edgeLabel || child.connectionLabel || child.relationship;
       edges.push({
         id: `e_${parentId}_${childId}`,
         source: parentId,
         target: childId,
         type: 'custom',
+        data: edgeLabel ? { label: edgeLabel } : undefined,
       });
 
       traverse(child, childId, depth + 1);

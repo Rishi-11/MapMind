@@ -40,21 +40,15 @@ const DEFAULT_TEMPLATES = AI_PROMPT_TEMPLATES && AI_PROMPT_TEMPLATES.length > 0
       },
     ];
 
-const EXAMPLE_AI_OUTPUT = `# Next-Gen Web Application
-- Frontend Layer [Client] : Modern reactive web client
-  - React 18 + TypeScript [Core]
-  - Tailwind CSS : Modern utility styling
-  - React Flow [@xyflow] : Interactive node canvas
-  - RoughJS : Hand-drawn sketch graphics
-- State & Storage [Offline-First] : High reliability local storage
-  - IndexedDB TimeMachine : 3-minute automatic snapshots
-  - Browser FileSystem API : Direct silent Ctrl+S save
-- Layout Engines [Math] : Automated graph positioning
-  - ELK.js : Symmetrical balanced radial mind maps
-  - Dagre : Strict hierarchical directed graphs
-- Export Pipeline [Vector/Raster] : Presentation ready
-  - Clean PNG & PDF : Filtered handles & zero artifacts
-  - SVG Vector : Scalable clean XML output`;
+const EXAMPLE_AI_OUTPUT = `# User Authentication Architecture
+- Authentication Engine [Security] : Verifies whether a user is genuinely who they claim to be
+-- Purpose [Defense] : Prevents unauthorized actors from accessing sensitive tenant data
+-- Credentials Intake [Input] : User supplies identifier and secret such as email and cryptographic password
+--- (submits to) --> Verification Logic {diamond} [Validation] : Checks supplied credentials against hashed Argon2 salt
+---- (on valid match) --> Session Generated [Outcome] : Issues signed JWT token for persistent authenticated state
+---- (on mismatch) --> Access Rejected [Outcome] : Rejects with 401 Unauthorized and increments rate limiter
+-- Multi-Factor OTP [Defense-in-Depth] : Generates ephemeral 6-digit TOTP code refreshed every 30 seconds
+--- Why Needed [Risk Mitigation] : Protects the user account even if primary password was leaked in a breach`;
 
 export const AiChatMindMapModal: React.FC<AiChatMindMapModalProps> = ({
   isOpen,
