@@ -13,14 +13,15 @@ import {
   NodeTypes,
   EdgeTypes,
   useStore,
+  MarkerType,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { MapMindNode, MapMindEdge, CanvasSettings } from '@/types/graph';
+import { MapMindNode, MapMindEdge, CanvasSettings, NodeColorTheme } from '@/types/graph';
 import { CustomNode } from './CustomNode';
 import { CustomEdge } from './CustomEdge';
 import { CANVAS_BACKGROUND_PRESETS } from '@/lib/canvasThemes';
-import { resolveNodeDragCollision } from '@/lib/collision/collisionAvoidance';
+import { getNodeBoundingBox, resolveNodeDragCollision } from '@/lib/collision/collisionAvoidance';
 
 interface DiagramCanvasProps {
   nodes: MapMindNode[];
@@ -45,6 +46,7 @@ interface DiagramCanvasProps {
   onStopEditingEdge?: (edgeId: string) => void;
   onDeleteNode?: (nodeId: string) => void;
   onDeleteEdge?: (edgeId: string) => void;
+  onExpandWithAi?: (nodeId: string) => void;
 }
 
 const nodeTypes: NodeTypes = {
@@ -53,6 +55,16 @@ const nodeTypes: NodeTypes = {
 
 const edgeTypes: EdgeTypes = {
   custom: CustomEdge,
+};
+
+const BRANCH_STROKE_COLORS: Record<string, { light: string; dark: string }> = {
+  blue: { light: '#3b82f6', dark: '#60a5fa' },
+  emerald: { light: '#10b981', dark: '#34d399' },
+  purple: { light: '#8b5cf6', dark: '#a78bfa' },
+  amber: { light: '#f59e0b', dark: '#fbbf24' },
+  rose: { light: '#f43f5e', dark: '#fb7185' },
+  cyan: { light: '#06b6d4', dark: '#22d3ee' },
+  slate: { light: '#64748b', dark: '#94a3b8' },
 };
 
 export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
@@ -78,6 +90,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   onStopEditingEdge,
   onDeleteNode,
   onDeleteEdge,
+  onExpandWithAi,
 }) => {
   const zoom = useStore((s) => s.transform[2]);
   const isLOD = zoom < 0.55;
@@ -99,6 +112,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         onAddSibling: onAddSiblingNode,
         onStartEditing: onStartEditingNode,
         onStopEditing: onStopEditingNode,
+        onExpandWithAi,
         onSelect: (nodeId: string) => {
           const target = nodes.find((n) => n.id === nodeId) || null;
           onSelectNode(target);
@@ -117,6 +131,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     onAddSiblingNode,
     onStartEditingNode,
     onStopEditingNode,
+    onExpandWithAi,
     onSelectNode,
     onSelectEdge,
   ]);
@@ -127,91 +142,195 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     return map;
   }, [nodes]);
 
-  // Filter visible edges & dynamically compute optimal source/target handles + dynamic routing
+  // Extract obstacle bounding boxes from all visible cards for collision-avoiding edge routing
+  const obstacleBoxes = useMemo(() => {
+    return nodes
+      .filter((n) => !n.data?.hidden)
+      .map((n) => getNodeBoundingBox(n));
+  }, [nodes]);
+
+  // Background Theme Config
+  const bgPreset =
+    CANVAS_BACKGROUND_PRESETS[settings.backgroundPreset || 'warm'] ||
+    CANVAS_BACKGROUND_PRESETS.warm;
+  const isDark = settings.theme === 'dark';
+  const tone = isDark ? bgPreset.dark : bgPreset.light;
+
+  // Filter visible edges, group multi-edges and self-loops, and compute obstacle avoidance routing
   const visibleEdges = useMemo(() => {
     const visibleNodeIds = new Set(nodes.filter((n) => !n.data?.hidden).map((n) => n.id));
     const globalRouting = settings.edgeRoutingStyle || 'curved';
 
-    return edges
-      .filter((e) => visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target))
-      .map((edge) => {
-        const sourceNode = nodeMap.get(edge.source);
-        const targetNode = nodeMap.get(edge.target);
+    const rawVisible = edges.filter(
+      (e) => visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target)
+    );
 
-        let sourceHandle = 'source-right';
-        let targetHandle = 'target-left';
+    // Build approximate center segments for all raw visible edges for line jump detection
+    const allSegments = rawVisible.map((e) => {
+      const s = nodeMap.get(e.source);
+      const t = nodeMap.get(e.target);
+      return {
+        edgeId: e.id,
+        sourceId: e.source,
+        targetId: e.target,
+        p1: {
+          x: (s?.position.x || 0) + (s?.measured?.width || 190) / 2,
+          y: (s?.position.y || 0) + (s?.measured?.height || 75) / 2,
+        },
+        p2: {
+          x: (t?.position.x || 0) + (t?.measured?.width || 190) / 2,
+          y: (t?.position.y || 0) + (t?.measured?.height || 75) / 2,
+        },
+      };
+    });
 
-        if (sourceNode && targetNode) {
-          const dx = targetNode.position.x - sourceNode.position.x;
-          const dy = targetNode.position.y - sourceNode.position.y;
+    // Group parallel edges by node pair and self-loops by node id
+    const pairGroups = new Map<string, string[]>();
+    const selfLoopGroups = new Map<string, string[]>();
 
-          // If horizontal displacement is dominant
-          if (Math.abs(dx) >= Math.abs(dy) * 0.8) {
-            if (dx < 0) {
-              // Target is to the LEFT of Source -> connect from Left to Right
-              sourceHandle = 'source-left';
-              targetHandle = 'target-right';
-            } else {
-              // Target is to the RIGHT of Source -> connect from Right to Left
-              sourceHandle = 'source-right';
-              targetHandle = 'target-left';
-            }
+    rawVisible.forEach((e) => {
+      if (e.source === e.target) {
+        const list = selfLoopGroups.get(e.source) || [];
+        list.push(e.id);
+        selfLoopGroups.set(e.source, list);
+      } else {
+        const pairKey = [e.source, e.target].sort().join(':::');
+        const list = pairGroups.get(pairKey) || [];
+        list.push(e.id);
+        pairGroups.set(pairKey, list);
+      }
+    });
+
+    return rawVisible.map((edge) => {
+      const sourceNode = nodeMap.get(edge.source);
+      const targetNode = nodeMap.get(edge.target);
+      const isSelfLoop = edge.source === edge.target;
+
+      let sourceHandle = 'source-right';
+      let targetHandle = 'target-left';
+      let parallelIndex = 0;
+      let parallelCount = 1;
+      let selfLoopIndex = 0;
+
+      if (isSelfLoop) {
+        // Self-loop handle placement (Top-to-Top or Top-to-Right)
+        sourceHandle = 'source-top';
+        targetHandle = 'target-top';
+        const loopList = selfLoopGroups.get(edge.source) || [];
+        selfLoopIndex = loopList.indexOf(edge.id);
+      } else if (sourceNode && targetNode) {
+        const pairKey = [edge.source, edge.target].sort().join(':::');
+        const pairList = pairGroups.get(pairKey) || [];
+        parallelIndex = pairList.indexOf(edge.id);
+        parallelCount = pairList.length;
+
+        const dx = targetNode.position.x - sourceNode.position.x;
+        const dy = targetNode.position.y - sourceNode.position.y;
+
+        // If horizontal displacement is dominant
+        if (Math.abs(dx) >= Math.abs(dy) * 0.8) {
+          if (dx < 0) {
+            // Target is to the LEFT of Source
+            sourceHandle = 'source-left';
+            targetHandle = 'target-right';
           } else {
-            // Vertical displacement is dominant
-            if (dy < 0) {
-              // Target is ABOVE Source
-              sourceHandle = 'source-top';
-              targetHandle = 'target-bottom';
-            } else {
-              // Target is BELOW Source
-              sourceHandle = 'source-bottom';
-              targetHandle = 'target-top';
-            }
+            // Target is to the RIGHT of Source
+            sourceHandle = 'source-right';
+            targetHandle = 'target-left';
+          }
+        } else {
+          // Vertical displacement is dominant
+          if (dy < 0) {
+            // Target is ABOVE Source
+            sourceHandle = 'source-top';
+            targetHandle = 'target-bottom';
+          } else {
+            // Target is BELOW Source
+            sourceHandle = 'source-bottom';
+            targetHandle = 'target-top';
           }
         }
+      }
 
-        const isDimmed = Boolean(sourceNode?.data?.isDimmed || targetNode?.data?.isDimmed);
-        const isSelected = edge.id === selectedEdgeId;
-        const edgeRouting = edge.data?.routingStyle || globalRouting;
-        const edgeLabel = edge.data?.label || (typeof edge.label === 'string' ? edge.label : undefined);
+      const isDimmed = Boolean(sourceNode?.data?.isDimmed || targetNode?.data?.isDimmed);
+      const isSelected = edge.id === selectedEdgeId;
+      const edgeRouting = edge.data?.routingStyle || globalRouting;
+      const edgeLabel = edge.data?.label || (typeof edge.label === 'string' ? edge.label : undefined);
 
-        return {
-          ...edge,
-          sourceHandle,
-          targetHandle,
-          type: 'custom',
-          selected: isSelected,
-          data: {
-            ...edge.data,
-            label: edgeLabel,
-            routingStyle: edgeRouting,
-            onUpdateLabel: onUpdateEdgeLabel,
-            onStartEditing: onStartEditingEdge,
-            onStopEditing: onStopEditingEdge,
-            onDelete: onDeleteEdge,
-            onSelect: onSelectEdge,
-          },
-          style: {
-            strokeWidth: isSelected ? 2.5 : settings.sketchMode ? 2 : isDimmed ? 1 : 1.8,
-            stroke: isSelected
-              ? '#3b82f6'
-              : isDimmed
-              ? '#cbd5e1'
-              : settings.sketchMode
-              ? '#475569'
-              : '#94a3b8',
-            opacity: isDimmed ? 0.12 : 1,
-            transition: 'opacity 0.3s ease, stroke 0.3s ease, stroke-width 0.2s ease',
-            ...edge.style,
-          },
-        };
-      });
+      // Dynamic branch color inheritance:
+      // Edge inherits branch color from target (child branch) or source, or explicit edge color
+      const branchColorKey: NodeColorTheme =
+        (edge.data?.colorTheme as NodeColorTheme) ||
+        (targetNode?.data?.colorTheme as NodeColorTheme) ||
+        (sourceNode?.data?.colorTheme as NodeColorTheme) ||
+        'blue';
+
+      const branchColorPalette = BRANCH_STROKE_COLORS[branchColorKey] || BRANCH_STROKE_COLORS.blue;
+      const branchColor = isDark ? branchColorPalette.dark : branchColorPalette.light;
+
+      const edgeStroke = isSelected
+        ? isDark ? '#60a5fa' : '#2563eb'
+        : isDimmed
+        ? isDark ? '#334155' : '#cbd5e1'
+        : branchColor;
+
+      const markerEnd = {
+        type: MarkerType.ArrowClosed,
+        color: edgeStroke,
+        width: 15,
+        height: 15,
+      };
+
+      // Crossing candidate segments for line jump hops
+      const crossingSegments = allSegments
+        .filter((seg) => seg.edgeId !== edge.id && seg.sourceId !== edge.source && seg.targetId !== edge.target)
+        .map((seg) => ({ p1: seg.p1, p2: seg.p2, edgeId: seg.edgeId }));
+
+      return {
+        ...edge,
+        sourceHandle,
+        targetHandle,
+        type: 'custom',
+        selected: isSelected,
+        markerEnd,
+        data: {
+          ...edge.data,
+          colorTheme: branchColorKey,
+          label: edgeLabel,
+          routingStyle: edgeRouting,
+          isSelfLoop,
+          selfLoopIndex,
+          parallelIndex,
+          parallelCount,
+          obstacleBoxes,
+          canvasBg: tone.bg,
+          crossingSegments,
+          onUpdateLabel: onUpdateEdgeLabel,
+          onStartEditing: onStartEditingEdge,
+          onStopEditing: onStopEditingEdge,
+          onDelete: onDeleteEdge,
+          onSelect: onSelectEdge,
+        },
+        style: {
+          strokeWidth: isSelected ? 2.8 : settings.sketchMode ? 2.2 : isDimmed ? 1.2 : 2.0,
+          stroke: edgeStroke,
+          opacity: isDimmed ? 0.15 : 1,
+          transition: 'opacity 0.3s ease, stroke 0.3s ease, stroke-width 0.2s ease',
+          ...edge.style,
+        },
+      };
+    });
   }, [
     edges,
     nodes,
     nodeMap,
+    obstacleBoxes,
     settings.sketchMode,
     settings.edgeRoutingStyle,
+    settings.theme,
+    settings.backgroundPreset,
+    tone.bg,
+    isDark,
     selectedEdgeId,
     onUpdateEdgeLabel,
     onStartEditingEdge,
@@ -222,13 +341,16 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
 
   const onConnect = useCallback(
     (connection: Connection) => {
+      const newEdgeId = `e_${connection.source}_${connection.target}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       setEdges((eds) =>
         addEdge(
           {
             ...connection,
+            id: newEdgeId,
             type: 'custom',
             data: {
               routingStyle: settings.edgeRoutingStyle || 'curved',
+              isSelfLoop: connection.source === connection.target,
             },
           },
           eds
@@ -241,8 +363,9 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   // Handle Drag Stop with Collision Avoidance
   const handleNodeDragStop = useCallback(
     (event: MouseEvent | TouchEvent, node: MapMindNode) => {
-      // Check for collision avoidance setting with manual override (Alt key)
       const isAltPressed = 'altKey' in event ? event.altKey : false;
+      // When anti-collision is ON: strictly prevent any card overlap even if user tried to place on top!
+      // Only when anti-collision is OFF (or Alt pressed): allow cards to overlap.
       if (settings.collisionAvoidance && !isAltPressed) {
         setNodes((currentNodes) => {
           return resolveNodeDragCollision(node.id, currentNodes);
@@ -251,13 +374,6 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     },
     [settings.collisionAvoidance, setNodes]
   );
-
-  // Background Theme Config
-  const bgPreset =
-    CANVAS_BACKGROUND_PRESETS[settings.backgroundPreset || 'warm'] ||
-    CANVAS_BACKGROUND_PRESETS.warm;
-  const isDark = settings.theme === 'dark';
-  const tone = isDark ? bgPreset.dark : bgPreset.light;
 
   return (
     <div
@@ -306,8 +422,12 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
           type: 'custom',
           animated: false,
         }}
+        onlyRenderVisibleElements={nodes.length > 25}
+        elevateNodesOnSelect={false}
+        nodesFocusable={false}
+        edgesFocusable={false}
         fitView
-        minZoom={0.1}
+        minZoom={0.06}
         maxZoom={2.5}
         attributionPosition="bottom-left"
         className="mapmind-canvas"

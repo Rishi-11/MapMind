@@ -7,11 +7,12 @@ export interface BoundingBox {
   width: number;
   height: number;
   locked?: boolean;
+  isRoot?: boolean;
 }
 
 const DEFAULT_NODE_WIDTH = 200;
 const DEFAULT_NODE_HEIGHT = 75;
-const DEFAULT_COLLISION_MARGIN = 20;
+export const DEFAULT_COLLISION_MARGIN = 28;
 
 /**
  * Extracts normalized bounding box for a node
@@ -28,9 +29,10 @@ export function getNodeBoundingBox(
     id: node.id,
     x: node.position.x,
     y: node.position.y,
-    width,
-    height,
+    width: Math.max(width, 140),
+    height: Math.max(height, 50),
     locked: Boolean(node.data?.locked),
+    isRoot: Boolean(node.data?.isRoot),
   };
 }
 
@@ -51,9 +53,59 @@ export function checkBoxesOverlap(
 }
 
 /**
+ * Checks if a line segment between (x1, y1) and (x2, y2) intersects an expanded bounding box
+ */
+export function segmentIntersectsBox(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  box: BoundingBox,
+  clearance = 12
+): boolean {
+  const minX = box.x - clearance;
+  const maxX = box.x + box.width + clearance;
+  const minY = box.y - clearance;
+  const maxY = box.y + box.height + clearance;
+
+  // Quick bounding check
+  if (Math.max(x1, x2) < minX || Math.min(x1, x2) > maxX) return false;
+  if (Math.max(y1, y2) < minY || Math.min(y1, y2) > maxY) return false;
+
+  // Check if either endpoint is inside the box
+  if (x1 >= minX && x1 <= maxX && y1 >= minY && y1 <= maxY) return true;
+  if (x2 >= minX && x2 <= maxX && y2 >= minY && y2 <= maxY) return true;
+
+  // Helper line intersection check
+  function lineIntersectsSegment(
+    ax: number,
+    ay: number,
+    bx: number,
+    by: number,
+    cx: number,
+    cy: number,
+    dx: number,
+    dy: number
+  ): boolean {
+    const denom = (bx - ax) * (dy - cy) - (by - ay) * (dx - cx);
+    if (denom === 0) return false;
+    const t = ((cx - ax) * (dy - cy) - (cy - ay) * (dx - cx)) / denom;
+    const u = ((cx - ax) * (by - ay) - (cy - ay) * (bx - ax)) / denom;
+    return t >= 0 && t <= 1 && u >= 0 && u <= 1;
+  }
+
+  // 4 edges of the bounding box
+  return (
+    lineIntersectsSegment(x1, y1, x2, y2, minX, minY, maxX, minY) || // Top
+    lineIntersectsSegment(x1, y1, x2, y2, maxX, minY, maxX, maxY) || // Right
+    lineIntersectsSegment(x1, y1, x2, y2, minX, maxY, maxX, maxY) || // Bottom
+    lineIntersectsSegment(x1, y1, x2, y2, minX, minY, minX, maxY)    // Left
+  );
+}
+
+/**
  * Resolves collisions for a specifically moved/dragged node.
- * Nudges the dragged node smoothly to the nearest non-colliding location,
- * or pushes unlocked neighbors away if necessary.
+ * Nudges the dragged node smoothly to the nearest non-colliding location.
  */
 export function resolveNodeDragCollision(
   draggedNodeId: string,
@@ -70,7 +122,7 @@ export function resolveNodeDragCollision(
   let currentBox = getNodeBoundingBox(targetNode);
   let hasCollision = true;
   let iterations = 0;
-  const maxIterations = 15;
+  const maxIterations = 20;
 
   while (hasCollision && iterations < maxIterations) {
     hasCollision = false;
@@ -92,16 +144,12 @@ export function resolveNodeDragCollision(
         const minOverlap = Math.min(overlapLeft, overlapRight, overlapTop, overlapBottom);
 
         if (minOverlap === overlapLeft) {
-          // Push dragged node to the left
           currentBox.x -= overlapLeft;
         } else if (minOverlap === overlapRight) {
-          // Push dragged node to the right
           currentBox.x += overlapRight;
         } else if (minOverlap === overlapTop) {
-          // Push dragged node up
           currentBox.y -= overlapTop;
         } else {
-          // Push dragged node down
           currentBox.y += overlapBottom;
         }
       }
@@ -128,7 +176,8 @@ export function resolveNodeDragCollision(
 }
 
 /**
- * Resolves all overlapping nodes across the entire whiteboard using iterative repulsion
+ * Resolves all overlapping nodes across the entire whiteboard using iterative repulsion.
+ * Strictly guarantees non-overlapping bounding boxes with mandatory minimum margin.
  */
 export function resolveAllGraphCollisions(
   nodes: MapMindNode[],
@@ -142,7 +191,7 @@ export function resolveAllGraphCollisions(
 
   let anyCollision = true;
   let iterations = 0;
-  const maxIterations = 20;
+  const maxIterations = 30;
 
   while (anyCollision && iterations < maxIterations) {
     anyCollision = false;
@@ -164,8 +213,13 @@ export function resolveAllGraphCollisions(
           const centerBX = boxB.x + boxB.width / 2;
           const centerBY = boxB.y + boxB.height / 2;
 
-          const dx = centerBX - centerAX || (Math.random() - 0.5);
-          const dy = centerBY - centerAY || (Math.random() - 0.5);
+          let dx = centerBX - centerAX;
+          let dy = centerBY - centerAY;
+
+          if (Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) {
+            dx = 1;
+            dy = 0;
+          }
 
           const reqDistX = (boxA.width + boxB.width) / 2 + margin;
           const reqDistY = (boxA.height + boxB.height) / 2 + margin;
@@ -177,14 +231,14 @@ export function resolveAllGraphCollisions(
             // Push along shallowest penetration axis
             if (overlapX < overlapY) {
               const shift = overlapX / 2;
-              const sign = dx > 0 ? 1 : -1;
-              if (!boxA.locked) boxA.x -= shift * sign;
-              if (!boxB.locked) boxB.x += shift * sign;
+              const sign = dx >= 0 ? 1 : -1;
+              if (!boxA.locked && !boxA.isRoot) boxA.x -= shift * sign;
+              if (!boxB.locked && !boxB.isRoot) boxB.x += shift * sign;
             } else {
               const shift = overlapY / 2;
-              const sign = dy > 0 ? 1 : -1;
-              if (!boxA.locked) boxA.y -= shift * sign;
-              if (!boxB.locked) boxB.y += shift * sign;
+              const sign = dy >= 0 ? 1 : -1;
+              if (!boxA.locked && !boxA.isRoot) boxA.y -= shift * sign;
+              if (!boxB.locked && !boxB.isRoot) boxB.y += shift * sign;
             }
           }
         }

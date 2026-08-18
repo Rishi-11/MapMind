@@ -24,6 +24,7 @@ const AiChatMindMapModal = lazy(() => import('@/components/ui/AiChatMindMapModal
 const PresentationMode = lazy(() => import('@/components/ui/PresentationMode').then((m) => ({ default: m.PresentationMode })));
 const OutlineNavigatorDrawer = lazy(() => import('@/components/ui/OutlineNavigatorDrawer').then((m) => ({ default: m.OutlineNavigatorDrawer })));
 const SearchModal = lazy(() => import('@/components/ui/SearchModal').then((m) => ({ default: m.SearchModal })));
+const NodeExpansionModal = lazy(() => import('@/components/ui/NodeExpansionModal').then((m) => ({ default: m.NodeExpansionModal })));
 import { useAutoSaveHistory } from '@/hooks/useAutoSaveHistory';
 import { useFileSystem } from '@/hooks/useFileSystem';
 import { getDagreLayout } from '@/lib/layouts/dagreLayout';
@@ -170,6 +171,8 @@ export function AppContent() {
   const [isCanvasThemeOpen, setIsCanvasThemeOpen] = useState(false);
   const [isCleanBoardOpen, setIsCleanBoardOpen] = useState(false);
   const [isAiImportOpen, setIsAiImportOpen] = useState(false);
+  const [isAiExpandModalOpen, setIsAiExpandModalOpen] = useState(false);
+  const [aiExpandTargetNodeId, setAiExpandTargetNodeId] = useState<string | null>(null);
   const [isPresentationOpen, setIsPresentationOpen] = useState(false);
   const [isOutlineOpen, setIsOutlineOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -466,6 +469,26 @@ export function AppContent() {
     [triggerSave, setNodes, setEdges, centerOnNode, showNotification]
   );
 
+  // Open Context-Aware AI Node Expansion Modal
+  const handleOpenNodeExpansion = useCallback((nodeId: string) => {
+    setAiExpandTargetNodeId(nodeId);
+    setIsAiExpandModalOpen(true);
+  }, []);
+
+  // Apply Context-Aware AI Node Expansion
+  const handleApplyNodeExpansion = useCallback(
+    (updatedNodes: MapMindNode[], updatedEdges: MapMindEdge[], addedCount: number) => {
+      triggerSave('manual-save', `AI Expanded node with ${addedCount} sub-branches`);
+      setNodes(updatedNodes);
+      setEdges(updatedEdges);
+      showNotification(`Expanded branch with ${addedCount} new sub-nodes!`, 'success');
+      if (aiExpandTargetNodeId) {
+        setTimeout(() => centerOnNode(aiExpandTargetNodeId, 350), 50);
+      }
+    },
+    [triggerSave, setNodes, setEdges, showNotification, centerOnNode, aiExpandTargetNodeId]
+  );
+
   // Start & Stop Inline Editing
   const handleStartEditingNode = useCallback((nodeId: string) => {
     setNodes((current) =>
@@ -504,7 +527,7 @@ export function AppContent() {
           const res = await getElkLayout(targetNodes, targetEdges, { density });
           return res.nodes;
         } else {
-          const res = getDagreLayout(targetNodes, targetEdges, {
+          const res = await getDagreLayout(targetNodes, targetEdges, {
             direction: layoutMode as 'TB' | 'LR' | 'BT' | 'RL',
             density,
           });
@@ -513,7 +536,7 @@ export function AppContent() {
       } catch (err) {
         console.warn('Layout recalculation error, falling back to Dagre LR:', err);
         try {
-          const fallback = getDagreLayout(targetNodes, targetEdges, {
+          const fallback = await getDagreLayout(targetNodes, targetEdges, {
             direction: 'LR',
             density,
           });
@@ -545,7 +568,7 @@ export function AppContent() {
         const queue = [targetNodeId];
         while (queue.length > 0) {
           const parentId = queue.shift()!;
-          const childEdges = currentEdges.filter((e) => e.source === parentId);
+          const childEdges = currentEdges.filter((e) => e.source === parentId && e.source !== e.target);
           for (const edge of childEdges) {
             if (!descendantsToUpdate.has(edge.target)) {
               descendantsToUpdate.add(edge.target);
@@ -561,7 +584,7 @@ export function AppContent() {
           const parentId = queue.shift()!;
           const parent = nodeMap.get(parentId);
           if (parentId === targetNodeId || !parent?.data?.collapsed) {
-            const childEdges = currentEdges.filter((e) => e.source === parentId);
+            const childEdges = currentEdges.filter((e) => e.source === parentId && e.source !== e.target);
             for (const edge of childEdges) {
               if (!descendantsToUpdate.has(edge.target)) {
                 descendantsToUpdate.add(edge.target);
@@ -646,7 +669,9 @@ export function AppContent() {
 
         while (queue.length > 0) {
           const { id, depth } = queue.shift()!;
-          const children = currentEdges.filter((e) => e.source === id).map((e) => e.target);
+          const children = currentEdges
+            .filter((e) => e.source === id && e.source !== e.target)
+            .map((e) => e.target);
           for (const childId of children) {
             if (!depthMap.has(childId)) {
               depthMap.set(childId, depth + 1);
@@ -719,9 +744,9 @@ export function AppContent() {
       const currentNodes = nodesRef.current;
       const currentEdges = edgesRef.current;
 
-      // Find immediate parent (incoming edge where this node is target, or reverse connection)
-      const incomingEdge = currentEdges.find((e) => e.target === nodeId);
-      const outgoingEdge = currentEdges.find((e) => e.source === nodeId);
+      // Find immediate parent (incoming edge where this node is target, excluding self loops)
+      const incomingEdge = currentEdges.find((e) => e.target === nodeId && e.source !== nodeId);
+      const outgoingEdge = currentEdges.find((e) => e.source === nodeId && e.target !== nodeId);
       const immediateParentId = incomingEdge
         ? incomingEdge.source
         : outgoingEdge
@@ -733,7 +758,9 @@ export function AppContent() {
       const queue = [nodeId];
       while (queue.length > 0) {
         const curr = queue.shift()!;
-        const children = currentEdges.filter((e) => e.source === curr).map((e) => e.target);
+        const children = currentEdges
+          .filter((e) => e.source === curr && e.source !== e.target)
+          .map((e) => e.target);
         for (const childId of children) {
           if (!toDelete.has(childId)) {
             toDelete.add(childId);
@@ -774,7 +801,7 @@ export function AppContent() {
     [setNodes, setEdges, centerOnNode, showNotification]
   );
 
-  // Add Child Node (Tab) with immediate edit mode
+  // Add Child Node (Tab) with immediate edit mode and compact multi-child positioning
   const handleAddChildNode = useCallback(
     (parentId: string) => {
       const currentNodes = nodesRef.current;
@@ -784,21 +811,23 @@ export function AppContent() {
 
       const newId = `node_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
-      // Existing children for positioning
-      const existingChildEdges = currentEdges.filter((e) => e.source === parentId);
+      // Existing children for compact positioning
+      const existingChildEdges = currentEdges.filter((e) => e.source === parentId && e.source !== e.target);
       const existingChildNodes = existingChildEdges
         .map((e) => currentNodes.find((n) => n.id === e.target))
         .filter(Boolean) as MapMindNode[];
 
-      // Position logic: if parent is left of center, branch left; else right
+      const numChildren = existingChildNodes.length;
       const isLeft = parentNode.position.x < -50;
-      const xOffset = isLeft ? -270 : 270;
 
-      let targetY = parentNode.position.y;
-      if (existingChildNodes.length > 0) {
-        const maxY = Math.max(...existingChildNodes.map((n) => n.position.y));
-        targetY = maxY + 100;
-      }
+      // Multi-column compact wrap for child placements
+      const col = Math.floor(numChildren / 4);
+      const row = numChildren % 4;
+      const colSpacing = 240;
+      const rowSpacing = 85;
+
+      const xOffset = isLeft ? -(260 + col * colSpacing) : (260 + col * colSpacing);
+      const targetY = parentNode.position.y - 40 + row * rowSpacing;
 
       const rawNewNode: MapMindNode = {
         id: newId,
@@ -862,7 +891,7 @@ export function AppContent() {
       const currentNode = currentNodes.find((n) => n.id === nodeId);
       if (!currentNode) return;
 
-      const incomingEdge = currentEdges.find((e) => e.target === nodeId);
+      const incomingEdge = currentEdges.find((e) => e.target === nodeId && e.source !== nodeId);
 
       if (!incomingEdge || currentNode.data?.isRoot) {
         // If root node, adding sibling means adding a new main branch
@@ -875,13 +904,13 @@ export function AppContent() {
       const newId = `node_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
       // Find all siblings
-      const siblingEdges = currentEdges.filter((e) => e.source === parentId);
+      const siblingEdges = currentEdges.filter((e) => e.source === parentId && e.source !== e.target);
       const siblingNodes = siblingEdges
         .map((e) => currentNodes.find((n) => n.id === e.target))
         .filter(Boolean) as MapMindNode[];
 
       const maxY = Math.max(currentNode.position.y, ...siblingNodes.map((s) => s.position.y));
-      const targetY = maxY + 100;
+      const targetY = maxY + 85;
 
       const rawNewNode: MapMindNode = {
         id: newId,
@@ -1230,6 +1259,18 @@ export function AppContent() {
         return;
       }
 
+      // 8. Alt+E or (Ctrl+Shift+E) -> Expand Selected Node with AI
+      if (
+        (e.altKey && (e.key === 'e' || e.key === 'E')) ||
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'e' || e.key === 'E'))
+      ) {
+        if (activeId) {
+          e.preventDefault();
+          handleOpenNodeExpansion(activeId);
+        }
+        return;
+      }
+
       // 8. Direct Typing -> If user starts typing any alphanumeric letter while a node is selected, start editing immediately!
       if (
         e.key.length === 1 &&
@@ -1284,6 +1325,7 @@ export function AppContent() {
     handleOpen,
     centerOnNode,
     fitView,
+    handleOpenNodeExpansion,
   ]);
 
   // Apply Layout Engine (Dagre or ELK)
@@ -1299,7 +1341,7 @@ export function AppContent() {
           setEdges(result.edges);
           showNotification(`Applied Balanced Mind Map (${targetDensity})`, 'success');
         } else {
-          const result = getDagreLayout(nodesWithChildCounts, edges, {
+          const result = await getDagreLayout(nodesWithChildCounts, edges, {
             direction: layoutType as 'TB' | 'LR' | 'BT' | 'RL',
             density: targetDensity,
           });
@@ -1467,12 +1509,15 @@ export function AppContent() {
           onStopEditingEdge={handleStopEditingEdge}
           onDeleteNode={handleDeleteNode}
           onDeleteEdge={handleDeleteEdge}
+          onExpandWithAi={handleOpenNodeExpansion}
         />
 
         {/* Modern Floating Action Dock */}
         <FloatingActionDock
           onAddNode={handleAddNode}
           onOpenAiImport={() => setIsAiImportOpen(true)}
+          selectedNodeId={selectedNodeId}
+          onOpenNodeExpansion={handleOpenNodeExpansion}
           onOpenPresentation={() => setIsPresentationOpen(true)}
           isSpotlightActive={isSpotlightActive}
           onToggleSpotlight={() => setIsSpotlightActive((prev) => !prev)}
@@ -1558,6 +1603,23 @@ export function AppContent() {
               currentNodes={nodes}
               currentEdges={edges}
               onApplyMindMap={handleApplyAiMindMap}
+              onNotify={showNotification}
+            />
+          </ErrorBoundary>
+        </Suspense>
+      )}
+
+      {/* Context-Aware AI Node Expansion Modal (Lazy Loaded) */}
+      {isAiExpandModalOpen && (
+        <Suspense fallback={null}>
+          <ErrorBoundary fallbackTitle="AI Node Expansion">
+            <NodeExpansionModal
+              isOpen={isAiExpandModalOpen}
+              onClose={() => setIsAiExpandModalOpen(false)}
+              targetNodeId={aiExpandTargetNodeId}
+              nodes={nodesWithChildCounts}
+              edges={edges}
+              onApplyExpansion={handleApplyNodeExpansion}
               onNotify={showNotification}
             />
           </ErrorBoundary>

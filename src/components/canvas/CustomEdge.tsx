@@ -1,17 +1,13 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import {
-  EdgeProps,
-  getBezierPath,
-  getSmoothStepPath,
-  getStraightPath,
-  EdgeLabelRenderer,
-  BaseEdge,
-} from '@xyflow/react';
+import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
+import { EdgeProps, EdgeLabelRenderer, BaseEdge } from '@xyflow/react';
 import { Plus, Check, X, MessageSquare } from 'lucide-react';
 import { MapMindEdge, EdgeRoutingStyle } from '@/types/graph';
+import { computeObstacleAvoidingPath } from '@/lib/routing/edgeRouting';
 
-export const CustomEdge: React.FC<EdgeProps<MapMindEdge>> = ({
+const CustomEdgeComponent: React.FC<EdgeProps<MapMindEdge>> = ({
   id,
+  source,
+  target,
   sourceX,
   sourceY,
   targetX,
@@ -55,50 +51,26 @@ export const CustomEdge: React.FC<EdgeProps<MapMindEdge>> = ({
     }
   }, [isEditing]);
 
-  // Compute SVG Path and center label coordinates based on dynamic routing style
-  let edgePath = '';
-  let labelX = 0;
-  let labelY = 0;
-
-  if (routingStyle === 'curved') {
-    [edgePath, labelX, labelY] = getBezierPath({
-      sourceX,
-      sourceY,
-      sourcePosition,
-      targetX,
-      targetY,
-      targetPosition,
-      curvature: 0.28,
-    });
-  } else if (routingStyle === 'straight') {
-    [edgePath, labelX, labelY] = getStraightPath({
-      sourceX,
-      sourceY,
-      targetX,
-      targetY,
-    });
-  } else if (routingStyle === 'step') {
-    [edgePath, labelX, labelY] = getSmoothStepPath({
-      sourceX,
-      sourceY,
-      sourcePosition,
-      targetX,
-      targetY,
-      targetPosition,
-      borderRadius: 0,
-    });
-  } else {
-    // Default / smoothstep
-    [edgePath, labelX, labelY] = getSmoothStepPath({
-      sourceX,
-      sourceY,
-      sourcePosition,
-      targetX,
-      targetY,
-      targetPosition,
-      borderRadius: 16,
-    });
-  }
+  // Compute SVG Path with obstacle avoidance, distinct self-loop teardrops, and parallel multi-edge curves
+  const isSelfLoop = Boolean(data?.isSelfLoop || source === target);
+  const { path: edgePath, labelX, labelY } = computeObstacleAvoidingPath({
+    id,
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+    routingStyle,
+    isSelfLoop,
+    selfLoopIndex: data?.selfLoopIndex || 0,
+    parallelIndex: data?.parallelIndex || 0,
+    parallelCount: data?.parallelCount || 1,
+    obstacleBoxes: data?.obstacleBoxes as any,
+    sourceNodeId: source,
+    targetNodeId: target,
+    crossingSegments: data?.crossingSegments as any,
+  });
 
   const handleFinishEditing = useCallback(() => {
     setInternalEditing(false);
@@ -134,9 +106,24 @@ export const CustomEdge: React.FC<EdgeProps<MapMindEdge>> = ({
   };
 
   const hasLabel = Boolean(data?.label && data.label.trim().length > 0);
+  const canvasBg = (data?.canvasBg as string) || 'transparent';
 
   return (
     <>
+      {/* Background Mask Gap / Bridge Halo: Creates a clean gap over intersecting crossing lines */}
+      {canvasBg !== 'transparent' && (
+        <path
+          d={edgePath}
+          fill="none"
+          stroke={canvasBg}
+          strokeWidth={((style?.strokeWidth as number) || 2) + 5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="pointer-events-none"
+          style={{ opacity: 0.98 }}
+        />
+      )}
+
       <BaseEdge
         id={id}
         path={edgePath}
@@ -235,3 +222,30 @@ export const CustomEdge: React.FC<EdgeProps<MapMindEdge>> = ({
     </>
   );
 };
+
+function areEdgesEqual(prev: EdgeProps<MapMindEdge>, next: EdgeProps<MapMindEdge>): boolean {
+  if (prev.id !== next.id) return false;
+  if (prev.selected !== next.selected) return false;
+  if (prev.sourceX !== next.sourceX || prev.sourceY !== next.sourceY) return false;
+  if (prev.targetX !== next.targetX || prev.targetY !== next.targetY) return false;
+  if (prev.sourcePosition !== next.sourcePosition || prev.targetPosition !== next.targetPosition) return false;
+
+  const p = prev.data;
+  const n = next.data;
+  if (p === n) return true;
+  if (!p || !n) return false;
+
+  return (
+    p.label === n.label &&
+    p.routingStyle === n.routingStyle &&
+    p.colorTheme === n.colorTheme &&
+    p.isSelfLoop === n.isSelfLoop &&
+    p.selfLoopIndex === n.selfLoopIndex &&
+    p.parallelIndex === n.parallelIndex &&
+    p.parallelCount === n.parallelCount &&
+    p.isEditing === n.isEditing
+  );
+}
+
+export const CustomEdge = memo(CustomEdgeComponent, areEdgesEqual);
+CustomEdge.displayName = 'CustomEdge';

@@ -60,21 +60,32 @@ export const OutlineNavigatorDrawer: React.FC<OutlineNavigatorDrawerProps> = ({
       childrenMap.set(e.source, list);
     });
 
+    // Identify roots or root candidates
     let root = nodes.find((n) => n.data?.isRoot);
     if (!root && nodes.length > 0) {
-      const targetIds = new Set(edges.map((e) => e.target));
+      const targetIds = new Set(
+        edges.filter((e) => e.source !== e.target).map((e) => e.target)
+      );
       root = nodes.find((n) => !targetIds.has(n.id)) || nodes[0];
     }
 
     if (!root) return [];
 
-    function buildBranch(nodeId: string, depth: number): TreeNode | null {
+    function buildBranch(nodeId: string, depth: number, ancestors = new Set<string>()): TreeNode | null {
       const n = nodeMap.get(nodeId);
       if (!n) return null;
 
-      const childIds = childrenMap.get(nodeId) || [];
+      const nextAncestors = new Set(ancestors);
+      nextAncestors.add(nodeId);
+
+      const rawChildIds = childrenMap.get(nodeId) || [];
+      // Filter out self-loops and back-edges to ancestors to prevent cyclic stack overflow
+      const childIds = Array.from(new Set(rawChildIds)).filter(
+        (cid) => cid !== nodeId && !ancestors.has(cid)
+      );
+
       const childBranches = childIds
-        .map((cid) => buildBranch(cid, depth + 1))
+        .map((cid) => buildBranch(cid, depth + 1, nextAncestors))
         .filter(Boolean) as TreeNode[];
 
       return {

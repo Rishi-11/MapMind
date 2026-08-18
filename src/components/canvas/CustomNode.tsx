@@ -316,10 +316,11 @@ export interface CustomNodeProps extends NodeProps {
     onStartEditing?: (nodeId: string) => void;
     onStopEditing?: (nodeId: string) => void;
     onSelect?: (nodeId: string) => void;
+    onExpandWithAi?: (nodeId: string) => void;
   };
 }
 
-export const CustomNode = memo(({ id, data, selected }: CustomNodeProps) => {
+const CustomNodeComponent = ({ id, data, selected }: CustomNodeProps) => {
   const [internalEditing, setInternalEditing] = useState(Boolean(data.isEditing));
   const [labelValue, setLabelValue] = useState(data.label || 'Node');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -483,8 +484,12 @@ export const CustomNode = memo(({ id, data, selected }: CustomNodeProps) => {
         }`}
       >
         <Handle type="target" position={Position.Left} id="target-left" className="!w-2 !h-2 opacity-0" />
+        <Handle type="source" position={Position.Left} id="source-left" className="!w-2 !h-2 opacity-0" />
+        <Handle type="target" position={Position.Right} id="target-right" className="!w-2 !h-2 opacity-0" />
         <Handle type="source" position={Position.Right} id="source-right" className="!w-2 !h-2 opacity-0" />
         <Handle type="target" position={Position.Top} id="target-top" className="!w-2 !h-2 opacity-0" />
+        <Handle type="source" position={Position.Top} id="source-top" className="!w-2 !h-2 opacity-0" />
+        <Handle type="target" position={Position.Bottom} id="target-bottom" className="!w-2 !h-2 opacity-0" />
         <Handle type="source" position={Position.Bottom} id="source-bottom" className="!w-2 !h-2 opacity-0" />
 
         <div className="flex items-center gap-1.5 min-w-0">
@@ -759,6 +764,17 @@ export const CustomNode = memo(({ id, data, selected }: CustomNodeProps) => {
               <Plus className="w-3 h-3" />
             </button>
 
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                data.onExpandWithAi?.(id);
+              }}
+              title="Expand with AI (Context-Aware)"
+              className="p-0.5 rounded hover:bg-purple-100 dark:hover:bg-purple-950/70 text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 transition-colors"
+            >
+              <Sparkles className="w-3 h-3" />
+            </button>
+
             {(descendantCount > 0 || childCount > 0) && (
               <button
                 onClick={handleToggle}
@@ -852,6 +868,48 @@ export const CustomNode = memo(({ id, data, selected }: CustomNodeProps) => {
       </div>
     </div>
   );
-});
+};
 
+function areNodesEqual(prev: CustomNodeProps, next: CustomNodeProps): boolean {
+  if (prev.id !== next.id) return false;
+  if (prev.selected !== next.selected) return false;
+
+  const p = prev.data;
+  const n = next.data;
+  if (p === n) return true;
+  if (!p || !n) return false;
+
+  if (
+    p.label !== n.label ||
+    p.sublabel !== n.sublabel ||
+    p.colorTheme !== n.colorTheme ||
+    p.shape !== n.shape ||
+    p.cardStyle !== n.cardStyle ||
+    p.collapsed !== n.collapsed ||
+    p.hidden !== n.hidden ||
+    p.locked !== n.locked ||
+    p.isEditing !== n.isEditing ||
+    p.isDimmed !== n.isDimmed ||
+    p.isSpotlightTarget !== n.isSpotlightTarget ||
+    p.isLOD !== n.isLOD ||
+    p.sketchMode !== n.sketchMode ||
+    p.descendantCount !== n.descendantCount ||
+    p.childCount !== n.childCount
+  ) {
+    return false;
+  }
+
+  // Shallow compare tags array
+  if (p.tags !== n.tags) {
+    if (!p.tags || !n.tags) return false;
+    if (p.tags.length !== n.tags.length) return false;
+    for (let i = 0; i < p.tags.length; i++) {
+      if (p.tags[i] !== n.tags[i]) return false;
+    }
+  }
+
+  return true;
+}
+
+export const CustomNode = memo(CustomNodeComponent, areNodesEqual);
 CustomNode.displayName = 'CustomNode';

@@ -48,6 +48,12 @@ export interface CustomEdgeData extends Record<string, unknown> {
   isEditing?: boolean;
   colorTheme?: NodeColorTheme;
   animated?: boolean;
+  parallelIndex?: number;
+  parallelCount?: number;
+  isSelfLoop?: boolean;
+  selfLoopIndex?: number;
+  obstacleAvoidance?: boolean;
+  obstacleBoxes?: Array<{ id: string; x: number; y: number; width: number; height: number }>;
   onUpdateLabel?: (edgeId: string, label: string) => void;
   onStartEditing?: (edgeId: string) => void;
   onStopEditing?: (edgeId: string) => void;

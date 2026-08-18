@@ -13,20 +13,46 @@
 }
 
 /* React Flow custom style overrides for MapMind */
+.mapmind-canvas {
+  contain: layout style;
+}
+
+/* Strict Z-Index Layering: Nodes ALWAYS above Edges */
+.react-flow__edges {
+  z-index: 1 !important;
+}
+
+.react-flow__edge-labels {
+  z-index: 3 !important;
+}
+
+.react-flow__nodes {
+  z-index: 10 !important;
+}
+
 .react-flow__node {
   transition: transform 0.35s cubic-bezier(0.25, 1, 0.5, 1);
   will-change: transform;
+  contain: layout style;
+  backface-visibility: hidden;
+  z-index: 10 !important;
+}
+
+.react-flow__node.selected {
+  z-index: 25 !important;
 }
 
 .react-flow__node.dragging,
 .react-flow__node.selectable:active,
 .react-flow__node:active {
   transition: none !important;
+  z-index: 30 !important;
 }
 
 .react-flow__handle {
   transition: all 0.15s ease-in-out;
   border-radius: 9999px;
+  z-index: 5 !important;
 }
 
 .react-flow__handle:hover {

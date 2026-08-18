@@ -36,6 +36,8 @@ interface FloatingActionDockProps {
   onToggleCollisionAvoidance: () => void;
   layoutDensity: LayoutDensity;
   onChangeLayoutDensity: (density: LayoutDensity) => void;
+  selectedNodeId?: string | null;
+  onOpenNodeExpansion?: (nodeId: string) => void;
 }
 
 export const FloatingActionDock: React.FC<FloatingActionDockProps> = ({
@@ -56,6 +58,8 @@ export const FloatingActionDock: React.FC<FloatingActionDockProps> = ({
   onToggleCollisionAvoidance,
   layoutDensity,
   onChangeLayoutDensity,
+  selectedNodeId,
+  onOpenNodeExpansion,
 }) => {
   const [isLayoutMenuOpen, setIsLayoutMenuOpen] = useState(false);
   const [isRoutingMenuOpen, setIsRoutingMenuOpen] = useState(false);
@@ -236,6 +240,18 @@ export const FloatingActionDock: React.FC<FloatingActionDockProps> = ({
           <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
           <span>AI Map</span>
         </button>
+
+        {/* Contextual AI Node Expansion (When Node Selected) */}
+        {selectedNodeId && onOpenNodeExpansion && (
+          <button
+            onClick={() => onOpenNodeExpansion(selectedNodeId)}
+            title="Expand Selected Node with AI (Context-Aware)"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 text-[11px] font-bold shadow-xs hover:scale-[1.02] active:scale-95 transition-all cursor-pointer animate-in fade-in zoom-in-95 duration-150"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+            <span>Expand</span>
+          </button>
+        )}
 
         <div className="h-4 w-px bg-slate-200 dark:bg-slate-800 mx-0.5" />
 

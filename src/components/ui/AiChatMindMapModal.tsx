@@ -141,7 +141,7 @@ export const AiChatMindMapModal: React.FC<AiChatMindMapModalProps> = ({
         const layoutResult = await getElkLayout(finalNodes, finalEdges);
         onApplyMindMap(layoutResult.nodes, layoutResult.edges, importMode === 'replace');
       } else {
-        const layoutResult = getDagreLayout(finalNodes, finalEdges, {
+        const layoutResult = await getDagreLayout(finalNodes, finalEdges, {
           direction: layoutMode as 'TB' | 'LR',
         });
         onApplyMindMap(layoutResult.nodes, layoutResult.edges, importMode === 'replace');
