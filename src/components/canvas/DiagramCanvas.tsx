@@ -228,30 +228,39 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         parallelIndex = pairList.indexOf(edge.id);
         parallelCount = pairList.length;
 
-        const dx = targetNode.position.x - sourceNode.position.x;
-        const dy = targetNode.position.y - sourceNode.position.y;
+        // Dynamic optimal handle snapping based on exact bounding box geometry
+        const sW = sourceNode.measured?.width || (sourceNode.width as number) || 200;
+        const sH = sourceNode.measured?.height || (sourceNode.height as number) || 75;
+        const tW = targetNode.measured?.width || (targetNode.width as number) || 200;
+        const tH = targetNode.measured?.height || (targetNode.height as number) || 75;
 
-        // If horizontal displacement is dominant
-        if (Math.abs(dx) >= Math.abs(dy) * 0.8) {
-          if (dx < 0) {
-            // Target is to the LEFT of Source
-            sourceHandle = 'source-left';
-            targetHandle = 'target-right';
-          } else {
-            // Target is to the RIGHT of Source
+        const sCenterX = sourceNode.position.x + sW / 2;
+        const sCenterY = sourceNode.position.y + sH / 2;
+        const tCenterX = targetNode.position.x + tW / 2;
+        const tCenterY = targetNode.position.y + tH / 2;
+
+        const dx = tCenterX - sCenterX;
+        const dy = tCenterY - sCenterY;
+        const absDx = Math.abs(dx);
+        const absDy = Math.abs(dy);
+
+        // Optimal handle pair determination:
+        // Connects to nearest logical handle (Top, Bottom, Left, or Right) based on relative center positions
+        if (absDx >= absDy * 0.75) {
+          if (dx > 0) {
             sourceHandle = 'source-right';
             targetHandle = 'target-left';
+          } else {
+            sourceHandle = 'source-left';
+            targetHandle = 'target-right';
           }
         } else {
-          // Vertical displacement is dominant
-          if (dy < 0) {
-            // Target is ABOVE Source
-            sourceHandle = 'source-top';
-            targetHandle = 'target-bottom';
-          } else {
-            // Target is BELOW Source
+          if (dy > 0) {
             sourceHandle = 'source-bottom';
             targetHandle = 'target-top';
+          } else {
+            sourceHandle = 'source-top';
+            targetHandle = 'target-bottom';
           }
         }
       }
@@ -426,7 +435,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
           type: 'custom',
           animated: false,
         }}
-        onlyRenderVisibleElements={nodes.length > 25}
+        onlyRenderVisibleElements={false}
         elevateNodesOnSelect={false}
         nodesFocusable={false}
         edgesFocusable={false}

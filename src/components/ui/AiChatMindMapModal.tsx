@@ -9,6 +9,7 @@ import {
   BrainCircuit,
   ArrowRight,
   Loader2,
+  Search,
 } from 'lucide-react';
 import {
   AI_PROMPT_TEMPLATES,
@@ -33,9 +34,11 @@ const DEFAULT_TEMPLATES = AI_PROMPT_TEMPLATES && AI_PROMPT_TEMPLATES.length > 0
   ? AI_PROMPT_TEMPLATES
   : [
       {
-        id: 'chat-summary',
-        title: '💬 Summarize Chat / Discussion',
-        description: 'Transform our ongoing chat conversation into a structured mind map',
+        id: 'flow-mechanism',
+        title: '⚡ End-to-End Dynamic Process & Lifecycle Flow',
+        category: 'Flow & Mechanism',
+        badge: 'Master Flow',
+        description: 'Chronological cause-and-effect narrative: Trigger → Processing → Decision Gates → Outcomes',
         prompt: 'Please convert our discussion into an indented Markdown bullet-point mind map with # [Root Topic] and - [Subtopics].',
       },
     ];
@@ -63,6 +66,9 @@ export const AiChatMindMapModal: React.FC<AiChatMindMapModalProps> = ({
   const [selectedTemplate, setSelectedTemplate] = useState<AiPromptTemplate>(DEFAULT_TEMPLATES[0]);
   const [customPrompt, setCustomPrompt] = useState<string>(DEFAULT_TEMPLATES[0].prompt);
   const [copied, setCopied] = useState(false);
+  const [copiedTemplateId, setCopiedTemplateId] = useState<string | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Import State
   const [aiInputText, setAiInputText] = useState<string>('');
@@ -88,6 +94,40 @@ export const AiChatMindMapModal: React.FC<AiChatMindMapModalProps> = ({
   }, [aiInputText]);
 
   if (!isOpen) return null;
+
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    DEFAULT_TEMPLATES.forEach((t) => {
+      if (t.category) set.add(t.category);
+    });
+    return ['All', ...Array.from(set)];
+  }, []);
+
+  const filteredTemplates = useMemo(() => {
+    return DEFAULT_TEMPLATES.filter((tmpl) => {
+      const matchCat = selectedCategory === 'All' || tmpl.category === selectedCategory;
+      const matchSearch =
+        !searchQuery.trim() ||
+        tmpl.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        tmpl.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (tmpl.badge && tmpl.badge.toLowerCase().includes(searchQuery.toLowerCase()));
+      return matchCat && matchSearch;
+    });
+  }, [selectedCategory, searchQuery]);
+
+  const handleQuickCopyTemplate = async (e: React.MouseEvent, tmpl: AiPromptTemplate) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(tmpl.prompt);
+      setCopiedTemplateId(tmpl.id);
+      setSelectedTemplate(tmpl);
+      setCustomPrompt(tmpl.prompt);
+      onNotify?.(`Copied "${tmpl.title}" prompt to clipboard!`, 'success');
+      setTimeout(() => setCopiedTemplateId(null), 2000);
+    } catch {
+      onNotify?.('Failed to copy to clipboard', 'error');
+    }
+  };
 
   const handleSelectTemplate = (template: AiPromptTemplate) => {
     setSelectedTemplate(template);
@@ -264,30 +304,87 @@ export const AiChatMindMapModal: React.FC<AiChatMindMapModalProps> = ({
 
               {/* Template Picker */}
               <div>
-                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
-                  Select AI Prompt Template
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {DEFAULT_TEMPLATES.map((tmpl) => {
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                    Select AI Prompt Template ({filteredTemplates.length})
+                  </label>
+                  <div className="relative w-44">
+                    <Search className="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search templates..."
+                      className="w-full pl-7 pr-2.5 py-1 text-[11px] rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Category Pills Filter */}
+                <div className="flex flex-wrap gap-1 mb-2.5">
+                  {categories.map((cat) => (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setSelectedCategory(cat)}
+                      className={`px-2 py-0.5 rounded-md text-[10px] font-semibold transition-colors ${
+                        selectedCategory === cat
+                          ? 'bg-purple-600 text-white shadow-2xs'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-52 overflow-y-auto pr-1">
+                  {filteredTemplates.map((tmpl) => {
                     const isSelected = selectedTemplate?.id === tmpl.id;
+                    const isJustCopied = copiedTemplateId === tmpl.id;
                     return (
-                      <button
+                      <div
                         key={tmpl.id}
-                        type="button"
                         onClick={() => handleSelectTemplate(tmpl)}
-                        className={`p-3 rounded-xl border text-left transition-all ${
+                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer relative group ${
                           isSelected
                             ? 'border-purple-500 bg-purple-50/50 dark:bg-purple-950/40 ring-1 ring-purple-500 shadow-xs'
                             : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-750'
                         }`}
                       >
-                        <div className="text-xs font-bold text-slate-900 dark:text-slate-100">
-                          {tmpl.title}
+                        <div className="flex items-start justify-between gap-1.5">
+                          <div className="text-xs font-bold text-slate-900 dark:text-slate-100 leading-snug">
+                            {tmpl.title}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => handleQuickCopyTemplate(e, tmpl)}
+                            title="Quick copy prompt"
+                            className="p-1 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-purple-100 dark:hover:bg-purple-900/60 text-slate-500 hover:text-purple-600 dark:text-slate-400 dark:hover:text-purple-300 transition-colors shrink-0"
+                          >
+                            {isJustCopied ? (
+                              <Check className="w-3 h-3 text-emerald-600" />
+                            ) : (
+                              <Copy className="w-3 h-3" />
+                            )}
+                          </button>
                         </div>
-                        <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-tight">
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 line-clamp-2 leading-tight">
                           {tmpl.description}
                         </div>
-                      </button>
+                        {tmpl.badge && (
+                          <div className="mt-1.5 flex items-center gap-1">
+                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300">
+                              {tmpl.badge}
+                            </span>
+                            {tmpl.category && (
+                              <span className="text-[9px] text-slate-400">
+                                • {tmpl.category}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
                 </div>

@@ -140,7 +140,7 @@ export function computeParallelCurvePath(
   parallelCount: number,
   routingStyle: EdgeRoutingStyle
 ): RouteEdgeResult {
-  const normalOffset = (parallelIndex - (parallelCount - 1) / 2) * 34;
+  const normalOffset = (parallelIndex - (parallelCount - 1) / 2) * 32;
 
   const dx = targetX - sourceX;
   const dy = targetY - sourceY;
@@ -266,6 +266,81 @@ export function waypointsToFilletedPath(
 }
 
 /**
+ * Checks if a cubic Bezier curve intersects a bounding box by sampling 10 points along the arc.
+ */
+function bezierIntersectsBox(
+  p0: Point2D,
+  cp1: Point2D,
+  cp2: Point2D,
+  p3: Point2D,
+  box: BoundingBox,
+  clearance = 16
+): boolean {
+  let prev = p0;
+  const samples = 10;
+  for (let i = 1; i <= samples; i++) {
+    const t = i / samples;
+    const t1 = 1 - t;
+    const curr: Point2D = {
+      x: t1 * t1 * t1 * p0.x + 3 * t1 * t1 * t * cp1.x + 3 * t1 * t * t * cp2.x + t * t * t * p3.x,
+      y: t1 * t1 * t1 * p0.y + 3 * t1 * t1 * t * cp1.y + 3 * t1 * t * t * cp2.y + t * t * t * p3.y,
+    };
+    if (segmentIntersectsBox(prev.x, prev.y, curr.x, curr.y, box, clearance)) {
+      return true;
+    }
+    prev = curr;
+  }
+  return false;
+}
+
+/**
+ * Adjusts edge label position so it never overlaps source or target cards.
+ */
+function adjustLabelPosition(
+  labelX: number,
+  labelY: number,
+  sourceBox?: BoundingBox,
+  targetBox?: BoundingBox
+): Point2D {
+  const clearance = 26;
+  let adjustedX = labelX;
+  let adjustedY = labelY;
+
+  const isInside = (x: number, y: number, b: BoundingBox) =>
+    x >= b.x - clearance &&
+    x <= b.x + b.width + clearance &&
+    y >= b.y - clearance &&
+    y <= b.y + b.height + clearance;
+
+  if (sourceBox && isInside(adjustedX, adjustedY, sourceBox)) {
+    if (targetBox) {
+      // Move halfway between source and target boxes
+      const sMidX = sourceBox.x + sourceBox.width / 2;
+      const tMidX = targetBox.x + targetBox.width / 2;
+      const sMidY = sourceBox.y + sourceBox.height / 2;
+      const tMidY = targetBox.y + targetBox.height / 2;
+      adjustedX = (sMidX + tMidX) / 2;
+      adjustedY = (sMidY + tMidY) / 2;
+    } else {
+      adjustedY += sourceBox.height / 2 + clearance;
+    }
+  } else if (targetBox && isInside(adjustedX, adjustedY, targetBox)) {
+    if (sourceBox) {
+      const sMidX = sourceBox.x + sourceBox.width / 2;
+      const tMidX = targetBox.x + targetBox.width / 2;
+      const sMidY = sourceBox.y + sourceBox.height / 2;
+      const tMidY = targetBox.y + targetBox.height / 2;
+      adjustedX = (sMidX + tMidX) / 2;
+      adjustedY = (sMidY + tMidY) / 2;
+    } else {
+      adjustedY -= targetBox.height / 2 + clearance;
+    }
+  }
+
+  return { x: adjustedX, y: adjustedY };
+}
+
+/**
  * Calculates a strict obstacle-avoiding route that guarantees zero intersection with any card bounding boxes.
  */
 export function computeObstacleAvoidingPath(
@@ -296,17 +371,51 @@ export function computeObstacleAvoidingPath(
 
   const isMultiEdge = parallelCount > 1;
 
+  // Find source & target boxes for clearance and label refinement
+  const sourceBox = obstacleBoxes.find((b) => b.id === sourceNodeId);
+  const targetBox = obstacleBoxes.find((b) => b.id === targetNodeId);
+
   // Filter out source and target nodes from obstacle collision list
   const relevantObstacles = obstacleBoxes.filter(
     (b) => b.id !== sourceNodeId && b.id !== targetNodeId
   );
 
-  const CLEARANCE_MARGIN = 26;
+  const CLEARANCE_MARGIN = 24;
 
-  // Check if direct path intersects any obstacle
-  const collidingObstacles = relevantObstacles.filter((box) =>
-    segmentIntersectsBox(sourceX, sourceY, targetX, targetY, box, CLEARANCE_MARGIN)
-  );
+  // Adaptive curvature calculation:
+  // For sequential steps, use a clean low-amplitude curve (0.18 - 0.22) rather than wide sweeping loops
+  const dist = Math.hypot(targetX - sourceX, targetY - sourceY);
+  const adaptiveCurvature = Math.min(0.24, Math.max(0.14, 38 / Math.max(dist, 80)));
+
+  // Calculate default Bezier control points to check if curve clips an obstacle
+  let defaultCp1: Point2D = { x: sourceX, y: sourceY };
+  let defaultCp2: Point2D = { x: targetX, y: targetY };
+  if (sourcePosition === Position.Right) defaultCp1.x += dist * adaptiveCurvature * 2.2;
+  else if (sourcePosition === Position.Left) defaultCp1.x -= dist * adaptiveCurvature * 2.2;
+  else if (sourcePosition === Position.Bottom) defaultCp1.y += dist * adaptiveCurvature * 2.2;
+  else if (sourcePosition === Position.Top) defaultCp1.y -= dist * adaptiveCurvature * 2.2;
+
+  if (targetPosition === Position.Left) defaultCp2.x -= dist * adaptiveCurvature * 2.2;
+  else if (targetPosition === Position.Right) defaultCp2.x += dist * adaptiveCurvature * 2.2;
+  else if (targetPosition === Position.Top) defaultCp2.y -= dist * adaptiveCurvature * 2.2;
+  else if (targetPosition === Position.Bottom) defaultCp2.y += dist * adaptiveCurvature * 2.2;
+
+  // Check if direct path or curve intersects any intermediate obstacle
+  const collidingObstacles = relevantObstacles.filter((box) => {
+    const directHit = segmentIntersectsBox(sourceX, sourceY, targetX, targetY, box, CLEARANCE_MARGIN);
+    if (directHit) return true;
+    if (routingStyle === 'curved') {
+      return bezierIntersectsBox(
+        { x: sourceX, y: sourceY },
+        defaultCp1,
+        defaultCp2,
+        { x: targetX, y: targetY },
+        box,
+        CLEARANCE_MARGIN
+      );
+    }
+    return false;
+  });
 
   // If no obstacle collision:
   if (collidingObstacles.length === 0) {
@@ -322,37 +431,39 @@ export function computeObstacleAvoidingPath(
       );
     }
 
-    // Default fast XYFlow paths
     if (routingStyle === 'curved') {
-      const [path, labelX, labelY] = getBezierPath({
+      const [path, lx, ly] = getBezierPath({
         sourceX,
         sourceY,
         sourcePosition,
         targetX,
         targetY,
         targetPosition,
-        curvature: 0.28,
+        curvature: adaptiveCurvature,
       });
-      return { path, labelX, labelY, isDetour: false };
+      const adjusted = adjustLabelPosition(lx, ly, sourceBox, targetBox);
+      return { path, labelX: adjusted.x, labelY: adjusted.y, isDetour: false };
     } else if (routingStyle === 'straight') {
-      const [path, labelX, labelY] = getStraightPath({
+      const [path, lx, ly] = getStraightPath({
         sourceX,
         sourceY,
         targetX,
         targetY,
       });
-      return { path, labelX, labelY, isDetour: false };
+      const adjusted = adjustLabelPosition(lx, ly, sourceBox, targetBox);
+      return { path, labelX: adjusted.x, labelY: adjusted.y, isDetour: false };
     } else {
-      const [path, labelX, labelY] = getSmoothStepPath({
+      const [path, lx, ly] = getSmoothStepPath({
         sourceX,
         sourceY,
         sourcePosition,
         targetX,
         targetY,
         targetPosition,
-        borderRadius: routingStyle === 'step' ? 0 : 16,
+        borderRadius: routingStyle === 'step' ? 0 : 14,
       });
-      return { path, labelX, labelY, isDetour: false };
+      const adjusted = adjustLabelPosition(lx, ly, sourceBox, targetBox);
+      return { path, labelX: adjusted.x, labelY: adjusted.y, isDetour: false };
     }
   }
 
@@ -371,7 +482,7 @@ export function computeObstacleAvoidingPath(
   });
 
   // Determine initial launch vector from source handle
-  const leadOut = 28;
+  const leadOut = 24;
   let startLaunch: Point2D = { x: sourceX, y: sourceY };
   if (sourcePosition === Position.Right) startLaunch = { x: sourceX + leadOut, y: sourceY };
   else if (sourcePosition === Position.Left) startLaunch = { x: sourceX - leadOut, y: sourceY };
@@ -510,17 +621,18 @@ export function computeObstacleAvoidingPath(
     finalPath = parts.join(' ');
   } else {
     // Filleted Manhattan path with rounded corners & line jump hops
-    finalPath = waypointsToFilletedPath(simplifiedRoute, 16, detectedCrossings);
+    finalPath = waypointsToFilletedPath(simplifiedRoute, 14, detectedCrossings);
   }
 
   const midIdx = Math.floor(simplifiedRoute.length / 2);
-  const labelX = (simplifiedRoute[midIdx - 1].x + simplifiedRoute[midIdx].x) / 2;
-  const labelY = (simplifiedRoute[midIdx - 1].y + simplifiedRoute[midIdx].y) / 2;
+  const rawLabelX = (simplifiedRoute[midIdx - 1].x + simplifiedRoute[midIdx].x) / 2;
+  const rawLabelY = (simplifiedRoute[midIdx - 1].y + simplifiedRoute[midIdx].y) / 2;
+  const adjustedLabel = adjustLabelPosition(rawLabelX, rawLabelY, sourceBox, targetBox);
 
   return {
     path: finalPath,
-    labelX,
-    labelY,
+    labelX: adjustedLabel.x,
+    labelY: adjustedLabel.y,
     isDetour: true,
   };
 }

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { CanvasSettings, MapMindNode, MapMindEdge } from '@/types/graph';
 import { CANVAS_BACKGROUND_PRESETS } from '@/lib/canvasThemes';
+import { generatePureVectorSvgString } from '@/lib/export/svgVectorExporter';
 
 interface ExportMenuProps {
   onClose: () => void;
@@ -41,6 +42,7 @@ interface DiagramBounds {
 export const ExportMenu: React.FC<ExportMenuProps> = ({
   onClose,
   nodes = [],
+  edges = [],
   settings,
   onNotify,
 }) => {
@@ -51,6 +53,7 @@ export const ExportMenu: React.FC<ExportMenuProps> = ({
   const [useCanvasBg, setUseCanvasBg] = useState(true);
   const [resolutionScale, setResolutionScale] = useState<number>(2); // 1x, 2x, 3x
   const [padding, setPadding] = useState<number>(80); // 40, 80, 140
+  const [svgMode, setSvgMode] = useState<'vector' | 'ui'>('vector');
 
   const getViewportElement = (): HTMLElement | null => {
     return document.querySelector('.react-flow__viewport') as HTMLElement | null;
@@ -358,31 +361,89 @@ export const ExportMenu: React.FC<ExportMenuProps> = ({
    * Download SVG vector covering the full diagram
    */
   const handleDownloadSvg = async () => {
-    const viewport = getViewportElement();
-    if (!viewport || !bounds) return;
-
-    const options = getExportOptions();
-    if (!options) return;
+    if (!bounds) return;
 
     setIsExporting(true);
     try {
-      const dataUrl = await toSvg(viewport, {
-        backgroundColor: options.backgroundColor,
-        width: options.width,
-        height: options.height,
-        style: options.style,
-        filter: options.filter,
-      });
+      let svgContent: string = '';
 
+      if (svgMode === 'vector') {
+        // High-performance pure vector SVG generator (immune to large graph DOM culling, size limits, or font CORS)
+        svgContent = generatePureVectorSvgString(
+          nodes,
+          edges,
+          settings,
+          bounds,
+          getExportBgColor(),
+          padding
+        );
+      } else {
+        const viewport = getViewportElement();
+        const options = getExportOptions();
+        if (viewport && options) {
+          try {
+            const dataUrl = await toSvg(viewport, {
+              backgroundColor: options.backgroundColor,
+              width: options.width,
+              height: options.height,
+              style: options.style,
+              filter: options.filter,
+              skipFonts: true,
+              cacheBust: true,
+            });
+
+            if (dataUrl.startsWith('data:image/svg+xml;charset=utf-8,')) {
+              svgContent = decodeURIComponent(dataUrl.substring('data:image/svg+xml;charset=utf-8,'.length));
+            } else if (dataUrl.startsWith('data:image/svg+xml;base64,')) {
+              svgContent = atob(dataUrl.substring('data:image/svg+xml;base64,'.length));
+            } else if (dataUrl.startsWith('data:image/svg+xml,')) {
+              svgContent = decodeURIComponent(dataUrl.substring('data:image/svg+xml,'.length));
+            } else {
+              svgContent = dataUrl;
+            }
+          } catch (domSvgErr) {
+            console.warn('DOM toSvg failed, falling back to pure vector SVG:', domSvgErr);
+            svgContent = generatePureVectorSvgString(
+              nodes,
+              edges,
+              settings,
+              bounds,
+              getExportBgColor(),
+              padding
+            );
+          }
+        } else {
+          svgContent = generatePureVectorSvgString(
+            nodes,
+            edges,
+            settings,
+            bounds,
+            getExportBgColor(),
+            padding
+          );
+        }
+      }
+
+      if (!svgContent.includes('xmlns="http://www.w3.org/2000/svg"')) {
+        svgContent = svgContent.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ');
+      }
+
+      // Use Blob and ObjectURL for streaming download without string URI limits
+      const blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
+      const objectUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = `mapmind_diagram_${Date.now()}.svg`;
+      a.href = objectUrl;
+      a.download = `mapmind_diagram_${bounds.exportWidth}x${bounds.exportHeight}_${Date.now()}.svg`;
+      document.body.appendChild(a);
       a.click();
-      onNotify?.('Downloaded full SVG vector!', 'success');
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+
+      onNotify?.(`Downloaded complete SVG vector (${bounds.exportWidth}×${bounds.exportHeight}px)!`, 'success');
       onClose();
     } catch (err) {
       console.error('Failed to download SVG:', err);
-      onNotify?.('Failed to download SVG.', 'error');
+      onNotify?.('Failed to generate SVG.', 'error');
     } finally {
       setIsExporting(false);
     }
@@ -631,26 +692,57 @@ export const ExportMenu: React.FC<ExportMenuProps> = ({
           </div>
 
           {/* Download SVG */}
-          <button
-            onClick={handleDownloadSvg}
-            disabled={isExporting}
-            className="w-full flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-750 transition-colors group text-left cursor-pointer disabled:opacity-50"
-          >
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-400">
-                <FileCode className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                  Download SVG Vector
+          <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-850/50">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-400">
+                  <FileCode className="w-5 h-5" />
                 </div>
-                <div className="text-xs text-slate-500 dark:text-slate-400">
-                  Infinite-resolution vector graphic for design tools
+                <div>
+                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    Download SVG Vector Graphic
+                  </div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                    Infinite-resolution vector graphic for design tools & web
+                  </div>
                 </div>
               </div>
             </div>
-            <Download className="w-4 h-4 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-200" />
-          </button>
+
+            <div className="flex items-center gap-2 mt-2 mb-3">
+              <button
+                type="button"
+                onClick={() => setSvgMode('vector')}
+                className={`flex-1 text-xs py-1.5 px-2 rounded-lg font-semibold border transition-colors cursor-pointer ${
+                  svgMode === 'vector'
+                    ? 'bg-white dark:bg-slate-700 border-purple-500 text-purple-600 dark:text-purple-300 shadow-xs'
+                    : 'border-transparent text-slate-600 dark:text-slate-400 hover:bg-slate-200/50 dark:hover:bg-slate-750'
+                }`}
+              >
+                Pure Vector (Figma / Illustrator)
+              </button>
+              <button
+                type="button"
+                onClick={() => setSvgMode('ui')}
+                className={`flex-1 text-xs py-1.5 px-2 rounded-lg font-semibold border transition-colors cursor-pointer ${
+                  svgMode === 'ui'
+                    ? 'bg-white dark:bg-slate-700 border-purple-500 text-purple-600 dark:text-purple-300 shadow-xs'
+                    : 'border-transparent text-slate-600 dark:text-slate-400 hover:bg-slate-200/50 dark:hover:bg-slate-750'
+                }`}
+              >
+                DOM UI Clone (Browser SVG)
+              </button>
+            </div>
+
+            <button
+              onClick={handleDownloadSvg}
+              disabled={isExporting}
+              className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {isExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+              Generate & Download SVG ({svgMode === 'vector' ? 'Vector' : 'UI Clone'})
+            </button>
+          </div>
         </div>
 
         <div className="pt-3 border-t border-slate-100 dark:border-slate-700/80 flex justify-end">

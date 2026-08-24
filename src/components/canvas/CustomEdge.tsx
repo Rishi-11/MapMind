@@ -205,16 +205,16 @@ const CustomEdgeComponent: React.FC<EdgeProps<MapMindEdge>> = ({
               </button>
             </div>
           ) : hasLabel ? (
-            /* Displayed Label Chip */
+            /* Displayed Solid Label Pill Container */
             <div
-              className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border shadow-xs transition-all select-none cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-0.5 rounded-full text-xs font-semibold border shadow-xs transition-all select-none cursor-pointer backdrop-blur-md ${
                 selected
-                  ? 'bg-blue-600 text-white border-blue-700 ring-2 ring-blue-300 dark:ring-blue-900'
-                  : 'bg-white/95 dark:bg-slate-800/95 text-slate-800 dark:text-slate-200 border-slate-200/90 dark:border-slate-700/90 hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 hover:shadow-md'
+                  ? 'bg-blue-600 text-white border-blue-700 ring-2 ring-blue-300 dark:ring-blue-900 shadow-md'
+                  : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 border-slate-300 dark:border-slate-700 hover:border-blue-500 hover:text-blue-600 dark:hover:text-blue-400 hover:shadow-md'
               }`}
               title="Double click or press F2 / Enter to edit connection label"
             >
-              <span className="truncate max-w-[160px]">{data?.label}</span>
+              <span className="truncate max-w-[180px]">{data?.label}</span>
             </div>
           ) : (
             /* Subtle + Label pill on hover / selection */
@@ -225,7 +225,7 @@ const CustomEdgeComponent: React.FC<EdgeProps<MapMindEdge>> = ({
               title="Add connection comment / condition (Press 'e' or click)"
               className={`opacity-0 group-hover:opacity-100 ${
                 selected ? '!opacity-100 ring-2 ring-blue-400' : ''
-              } flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-white/95 dark:bg-slate-850/95 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-400 shadow-sm transition-all cursor-pointer`}
+              } flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-400 shadow-sm transition-all cursor-pointer backdrop-blur-sm`}
             >
               <Plus className="w-2.5 h-2.5" />
               <span>Label</span>
