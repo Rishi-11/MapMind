@@ -22,19 +22,27 @@ const CustomEdgeComponent: React.FC<EdgeProps<MapMindEdge>> = ({
   const [internalEditing, setInternalEditing] = useState(Boolean(data?.isEditing));
   const [labelText, setLabelText] = useState(data?.label || '');
   const inputRef = useRef<HTMLInputElement>(null);
+  const dataRef = useRef(data);
+  dataRef.current = data;
+  const isCommittingRef = useRef(false);
 
   const routingStyle = (data?.routingStyle || 'curved') as EdgeRoutingStyle;
   const isEditing = Boolean(data?.isEditing) || internalEditing;
-
-  useEffect(() => {
-    setLabelText(data?.label || '');
-  }, [data?.label]);
+  const prevIsEditingRef = useRef(isEditing);
 
   useEffect(() => {
     if (data?.isEditing !== undefined) {
       setInternalEditing(Boolean(data.isEditing));
     }
   }, [data?.isEditing]);
+
+  // Synchronize local input state only when not actively editing or when entering editing mode
+  useEffect(() => {
+    if (!isEditing || (!prevIsEditingRef.current && isEditing)) {
+      setLabelText(data?.label || '');
+    }
+    prevIsEditingRef.current = isEditing;
+  }, [data?.label, isEditing]);
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -73,20 +81,26 @@ const CustomEdgeComponent: React.FC<EdgeProps<MapMindEdge>> = ({
   });
 
   const handleFinishEditing = useCallback(() => {
+    if (isCommittingRef.current) return;
+    isCommittingRef.current = true;
     setInternalEditing(false);
-    data?.onStopEditing?.(id);
+    dataRef.current?.onStopEditing?.(id);
 
     const trimmed = labelText.trim();
-    if (trimmed !== data?.label) {
-      data?.onUpdateLabel?.(id, trimmed);
+    if (trimmed !== dataRef.current?.label) {
+      dataRef.current?.onUpdateLabel?.(id, trimmed);
     }
-  }, [id, labelText, data]);
+
+    setTimeout(() => {
+      isCommittingRef.current = false;
+    }, 60);
+  }, [id, labelText]);
 
   const handleCancelEditing = useCallback(() => {
-    setLabelText(data?.label || '');
+    setLabelText(dataRef.current?.label || '');
     setInternalEditing(false);
-    data?.onStopEditing?.(id);
-  }, [id, data]);
+    dataRef.current?.onStopEditing?.(id);
+  }, [id]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     e.stopPropagation(); // Never trigger global canvas shortcuts while typing edge label

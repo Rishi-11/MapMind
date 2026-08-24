@@ -19,6 +19,7 @@ export type CanvasBackgroundPreset =
 
 export interface CustomNodeData extends Record<string, unknown> {
   label: string;
+  title?: string;
   sublabel?: string;
   colorTheme?: NodeColorTheme;
   collapsed?: boolean;

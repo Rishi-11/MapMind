@@ -25,6 +25,7 @@ const PresentationMode = lazy(() => import('@/components/ui/PresentationMode').t
 const OutlineNavigatorDrawer = lazy(() => import('@/components/ui/OutlineNavigatorDrawer').then((m) => ({ default: m.OutlineNavigatorDrawer })));
 const SearchModal = lazy(() => import('@/components/ui/SearchModal').then((m) => ({ default: m.SearchModal })));
 const NodeExpansionModal = lazy(() => import('@/components/ui/NodeExpansionModal').then((m) => ({ default: m.NodeExpansionModal })));
+const QuickTagModal = lazy(() => import('@/components/ui/QuickTagModal').then((m) => ({ default: m.QuickTagModal })));
 import { useAutoSaveHistory } from '@/hooks/useAutoSaveHistory';
 import { useFileSystem } from '@/hooks/useFileSystem';
 import { getDagreLayout } from '@/lib/layouts/dagreLayout';
@@ -179,6 +180,7 @@ export function AppContent() {
   const [isSpotlightActive, setIsSpotlightActive] = useState(false);
   const [isTimeMachineOpen, setIsTimeMachineOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const [isQuickTagOpen, setIsQuickTagOpen] = useState(false);
   const [isLayouting, setIsLayouting] = useState(false);
   const [currentLayout, setCurrentLayout] = useState<LayoutDirection>('BALANCED_MINDMAP');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -414,6 +416,7 @@ export function AppContent() {
           selected: true,
           data: {
             label: 'Central Topic',
+            title: 'Central Topic',
             colorTheme: 'blue',
             isRoot: true,
             tags: ['Main'],
@@ -491,9 +494,12 @@ export function AppContent() {
 
   // Start & Stop Inline Editing
   const handleStartEditingNode = useCallback((nodeId: string) => {
+    setSelectedNodeId(nodeId);
+    setSelectedEdgeId(null);
     setNodes((current) =>
       current.map((n) => ({
         ...n,
+        selected: n.id === nodeId,
         data: {
           ...n.data,
           isEditing: n.id === nodeId,
@@ -721,9 +727,13 @@ export function AppContent() {
   // Update node label directly
   const handleUpdateNodeLabel = useCallback(
     (nodeId: string, label: string) => {
-      setNodes((nds) =>
-        nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, label } } : n))
-      );
+      setNodes((nds) => {
+        const updated = nds.map((n) =>
+          n.id === nodeId ? { ...n, data: { ...n.data, label, title: label } } : n
+        );
+        nodesRef.current = updated;
+        return updated;
+      });
     },
     [setNodes]
   );
@@ -731,9 +741,13 @@ export function AppContent() {
   // Update arbitrary node properties
   const handleUpdateNode = useCallback(
     (nodeId: string, updates: Partial<MapMindNode['data']>) => {
-      setNodes((nds) =>
-        nds.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, ...updates } } : n))
-      );
+      setNodes((nds) => {
+        const updated = nds.map((n) =>
+          n.id === nodeId ? { ...n, data: { ...n.data, ...updates } } : n
+        );
+        nodesRef.current = updated;
+        return updated;
+      });
     },
     [setNodes]
   );
@@ -803,7 +817,7 @@ export function AppContent() {
 
   // Add Child Node (Tab) with immediate edit mode and compact multi-child positioning
   const handleAddChildNode = useCallback(
-    (parentId: string) => {
+    (parentId: string, parentLabelToCommit?: string) => {
       const currentNodes = nodesRef.current;
       const currentEdges = edgesRef.current;
       const parentNode = currentNodes.find((n) => n.id === parentId);
@@ -839,6 +853,7 @@ export function AppContent() {
         },
         data: {
           label: 'New Child',
+          title: 'New Child',
           colorTheme: parentNode.data?.colorTheme || 'blue',
           tags: ['Idea'],
           isEditing: true, // Immediately start typing!
@@ -855,17 +870,24 @@ export function AppContent() {
         },
       };
 
-      // Unselect all other nodes, ensure parent is uncollapsed, and append new node
+      // Unselect all other nodes, ensure parent is uncollapsed, commit parent's typed label if provided, and append new node
       const updatedNodes = [
-        ...currentNodes.map((n) => ({
-          ...n,
-          selected: false,
-          data: {
-            ...n.data,
-            isEditing: false,
-            collapsed: n.id === parentId ? false : n.data?.collapsed,
-          },
-        })),
+        ...currentNodes.map((n) => {
+          const isTargetParent = n.id === parentId;
+          const updatedLabel =
+            isTargetParent && parentLabelToCommit !== undefined ? parentLabelToCommit : n.data?.label;
+          return {
+            ...n,
+            selected: false,
+            data: {
+              ...n.data,
+              label: updatedLabel,
+              title: updatedLabel,
+              isEditing: false,
+              collapsed: isTargetParent ? false : n.data?.collapsed,
+            },
+          };
+        }),
         rawNewNode,
       ];
 
@@ -874,10 +896,18 @@ export function AppContent() {
         ? resolveNodeDragCollision(newId, updatedNodes)
         : updatedNodes;
 
+      nodesRef.current = resolvedNodes;
       setNodes(resolvedNodes);
-      setEdges((eds) => [...eds, newEdge]);
+
+      const nextEdges = [...currentEdges, newEdge];
+      edgesRef.current = nextEdges;
+      setEdges(nextEdges);
+
+      selectedNodeIdRef.current = newId;
       setSelectedNodeId(newId);
+      selectedEdgeIdRef.current = null;
       setSelectedEdgeId(null);
+
       setTimeout(() => centerOnNode(newId, 300), 50);
     },
     [setNodes, setEdges, centerOnNode, settings.edgeRoutingStyle, settings.collisionAvoidance]
@@ -885,7 +915,7 @@ export function AppContent() {
 
   // Add Sibling Node (Enter) with immediate edit mode
   const handleAddSiblingNode = useCallback(
-    (nodeId: string) => {
+    (nodeId: string, currentLabelToCommit?: string) => {
       const currentNodes = nodesRef.current;
       const currentEdges = edgesRef.current;
       const currentNode = currentNodes.find((n) => n.id === nodeId);
@@ -895,7 +925,7 @@ export function AppContent() {
 
       if (!incomingEdge || currentNode.data?.isRoot) {
         // If root node, adding sibling means adding a new main branch
-        handleAddChildNode(nodeId);
+        handleAddChildNode(nodeId, currentLabelToCommit);
         return;
       }
 
@@ -922,6 +952,7 @@ export function AppContent() {
         },
         data: {
           label: 'New Idea',
+          title: 'New Idea',
           colorTheme: parentNode?.data?.colorTheme || currentNode.data?.colorTheme || 'blue',
           tags: ['Idea'],
           isEditing: true, // Immediately start typing!
@@ -939,7 +970,21 @@ export function AppContent() {
       };
 
       const updatedNodes = [
-        ...currentNodes.map((n) => ({ ...n, selected: false, data: { ...n.data, isEditing: false } })),
+        ...currentNodes.map((n) => {
+          const isTargetNode = n.id === nodeId;
+          const updatedLabel =
+            isTargetNode && currentLabelToCommit !== undefined ? currentLabelToCommit : n.data?.label;
+          return {
+            ...n,
+            selected: false,
+            data: {
+              ...n.data,
+              label: updatedLabel,
+              title: updatedLabel,
+              isEditing: false,
+            },
+          };
+        }),
         rawNewNode,
       ];
 
@@ -947,13 +992,55 @@ export function AppContent() {
         ? resolveNodeDragCollision(newId, updatedNodes)
         : updatedNodes;
 
+      nodesRef.current = resolvedNodes;
       setNodes(resolvedNodes);
-      setEdges((eds) => [...eds, newEdge]);
+
+      const nextEdges = [...currentEdges, newEdge];
+      edgesRef.current = nextEdges;
+      setEdges(nextEdges);
+
+      selectedNodeIdRef.current = newId;
       setSelectedNodeId(newId);
+      selectedEdgeIdRef.current = null;
       setSelectedEdgeId(null);
+
       setTimeout(() => centerOnNode(newId, 300), 50);
     },
     [handleAddChildNode, setNodes, setEdges, centerOnNode, settings.edgeRoutingStyle, settings.collisionAvoidance]
+  );
+
+  // Atomically commit node title and transition edit mode / add child or sibling
+  const handleCommitNodeLabel = useCallback(
+    (nodeId: string, label: string, action: 'none' | 'add-child' | 'add-sibling' = 'none') => {
+      const trimmed = label.trim() || 'Untitled Node';
+      if (action === 'add-child') {
+        handleAddChildNode(nodeId, trimmed);
+      } else if (action === 'add-sibling') {
+        handleAddSiblingNode(nodeId, trimmed);
+      } else {
+        selectedNodeIdRef.current = nodeId;
+        setSelectedNodeId(nodeId);
+        setNodes((nds) => {
+          const updated = nds.map((n) =>
+            n.id === nodeId
+              ? {
+                  ...n,
+                  selected: true,
+                  data: {
+                    ...n.data,
+                    label: trimmed,
+                    title: trimmed,
+                    isEditing: false,
+                  },
+                }
+              : n
+          );
+          nodesRef.current = updated;
+          return updated;
+        });
+      }
+    },
+    [handleAddChildNode, handleAddSiblingNode, setNodes]
   );
 
   // Add root / free node
@@ -977,6 +1064,7 @@ export function AppContent() {
       position: { x, y },
       data: {
         label: 'Topic Branch',
+        title: 'Topic Branch',
         colorTheme: 'blue',
         tags: ['Draft'],
         isEditing: true,
@@ -1171,14 +1259,34 @@ export function AppContent() {
         return;
       }
 
+      const isSpaceKey =
+        e.key === ' ' ||
+        e.key === 'Spacebar' ||
+        e.key === 'Space' ||
+        e.code === 'Space' ||
+        e.keyCode === 32;
+
+      const isF2Key =
+        e.key === 'F2' ||
+        e.code === 'F2' ||
+        e.keyCode === 113;
+
       // 3. Space or F2 -> Start Editing Selected Node or Selected Edge
-      if (e.key === ' ' || e.key === 'F2') {
-        if (activeId) {
+      if (isSpaceKey || isF2Key) {
+        const activeNodeId =
+          activeId ||
+          selectedNodeId ||
+          nodesRef.current.find((n) => n.selected)?.id ||
+          (nodesRef.current.length > 0 ? nodesRef.current[nodesRef.current.length - 1].id : null);
+
+        if (activeNodeId) {
           e.preventDefault();
-          handleStartEditingNode(activeId);
+          e.stopPropagation();
+          handleStartEditingNode(activeNodeId);
           return;
         } else if (selectedEdgeIdRef.current) {
           e.preventDefault();
+          e.stopPropagation();
           handleStartEditingEdge(selectedEdgeIdRef.current);
           return;
         }
@@ -1199,6 +1307,28 @@ export function AppContent() {
         } else if (selectedEdgeIdRef.current) {
           e.preventDefault();
           handleStartEditingEdge(selectedEdgeIdRef.current);
+          return;
+        }
+      }
+
+      // 3c. 't' or 'T' or '#' -> Quick Add / Manage Tags on Selected Node
+      if (
+        (e.key === 't' || e.key === 'T' || e.key === '#' || (e.altKey && (e.key === 't' || e.key === 'T'))) &&
+        !e.ctrlKey &&
+        !e.metaKey
+      ) {
+        const activeNodeId =
+          activeId ||
+          selectedNodeId ||
+          nodesRef.current.find((n) => n.selected)?.id ||
+          (nodesRef.current.length > 0 ? nodesRef.current[nodesRef.current.length - 1].id : null);
+
+        if (activeNodeId) {
+          e.preventDefault();
+          e.stopPropagation();
+          setSelectedNodeId(activeNodeId);
+          selectedNodeIdRef.current = activeNodeId;
+          setIsQuickTagOpen(true);
           return;
         }
       }
@@ -1274,6 +1404,7 @@ export function AppContent() {
       // 8. Direct Typing -> If user starts typing any alphanumeric letter while a node is selected, start editing immediately!
       if (
         e.key.length === 1 &&
+        !isSpaceKey &&
         !e.ctrlKey &&
         !e.metaKey &&
         !e.altKey &&
@@ -1281,7 +1412,18 @@ export function AppContent() {
         e.key !== 'e' &&
         e.key !== 'E' &&
         e.key !== 'l' &&
-        e.key !== 'L'
+        e.key !== 'L' &&
+        e.key !== 't' &&
+        e.key !== 'T' &&
+        e.key !== '#' &&
+        e.key !== 'c' &&
+        e.key !== 'C' &&
+        e.key !== 'f' &&
+        e.key !== 'F' &&
+        e.key !== 'p' &&
+        e.key !== 'P' &&
+        e.key !== 'o' &&
+        e.key !== 'O'
       ) {
         if (activeId) {
           handleStartEditingNode(activeId);
@@ -1492,17 +1634,35 @@ export function AppContent() {
           onToggleCollapse={handleToggleCollapse}
           onToggleLock={handleToggleLock}
           onUpdateNodeLabel={handleUpdateNodeLabel}
+          onCommitNodeLabel={handleCommitNodeLabel}
           onAddChildNode={handleAddChildNode}
           onAddSiblingNode={handleAddSiblingNode}
           onStartEditingNode={handleStartEditingNode}
           onStopEditingNode={handleStopEditingNode}
           onSelectNode={(node) => {
-            setSelectedNodeId(node ? node.id : null);
-            if (node) setSelectedEdgeId(null);
+            const nextId = node ? node.id : null;
+            selectedNodeIdRef.current = nextId;
+            setSelectedNodeId(nextId);
+            if (node) {
+              selectedEdgeIdRef.current = null;
+              setSelectedEdgeId(null);
+              setNodes((nds) => {
+                const updated = nds.map((n) => ({
+                  ...n,
+                  selected: n.id === nextId,
+                }));
+                nodesRef.current = updated;
+                return updated;
+              });
+            }
           }}
           onSelectEdge={(edgeId) => {
+            selectedEdgeIdRef.current = edgeId;
             setSelectedEdgeId(edgeId);
-            if (edgeId) setSelectedNodeId(null);
+            if (edgeId) {
+              selectedNodeIdRef.current = null;
+              setSelectedNodeId(null);
+            }
           }}
           onUpdateEdgeLabel={handleUpdateEdgeLabel}
           onStartEditingEdge={handleStartEditingEdge}
@@ -1646,6 +1806,18 @@ export function AppContent() {
             onClose={() => setIsCanvasThemeOpen(false)}
             settings={settings}
             onUpdateSettings={(updates) => setSettings((s) => ({ ...s, ...updates }))}
+          />
+        </Suspense>
+      )}
+
+      {/* Quick Tag Modal (Shortcut: 't' or '#') (Lazy Loaded) */}
+      {isQuickTagOpen && (
+        <Suspense fallback={null}>
+          <QuickTagModal
+            isOpen={isQuickTagOpen}
+            onClose={() => setIsQuickTagOpen(false)}
+            selectedNode={selectedNode}
+            onUpdateTags={(nodeId, tags) => handleUpdateNode(nodeId, { tags })}
           />
         </Suspense>
       )}

@@ -35,8 +35,9 @@ interface DiagramCanvasProps {
   onToggleCollapse: (nodeId: string) => void;
   onToggleLock: (nodeId: string) => void;
   onUpdateNodeLabel: (nodeId: string, label: string) => void;
-  onAddChildNode: (nodeId: string) => void;
-  onAddSiblingNode: (nodeId: string) => void;
+  onCommitNodeLabel?: (nodeId: string, label: string, action?: 'none' | 'add-child' | 'add-sibling') => void;
+  onAddChildNode: (nodeId: string, labelToCommit?: string) => void;
+  onAddSiblingNode: (nodeId: string, labelToCommit?: string) => void;
   onStartEditingNode: (nodeId: string) => void;
   onStopEditingNode: (nodeId: string) => void;
   onSelectNode: (node: MapMindNode | null) => void;
@@ -79,6 +80,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   onToggleCollapse,
   onToggleLock,
   onUpdateNodeLabel,
+  onCommitNodeLabel,
   onAddChildNode,
   onAddSiblingNode,
   onStartEditingNode,
@@ -108,13 +110,14 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         onToggleCollapse,
         onToggleLock,
         onUpdateLabel: onUpdateNodeLabel,
+        onCommitLabel: onCommitNodeLabel,
         onAddChild: onAddChildNode,
         onAddSibling: onAddSiblingNode,
         onStartEditing: onStartEditingNode,
         onStopEditing: onStopEditingNode,
         onExpandWithAi,
         onSelect: (nodeId: string) => {
-          const target = nodes.find((n) => n.id === nodeId) || null;
+          const target = nodes.find((n) => n.id === nodeId) || ({ id: nodeId } as MapMindNode);
           onSelectNode(target);
           onSelectEdge?.(null);
         },
@@ -127,6 +130,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     onToggleCollapse,
     onToggleLock,
     onUpdateNodeLabel,
+    onCommitNodeLabel,
     onAddChildNode,
     onAddSiblingNode,
     onStartEditingNode,
@@ -426,6 +430,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         elevateNodesOnSelect={false}
         nodesFocusable={false}
         edgesFocusable={false}
+        panActivationKeyCode={null}
         fitView
         minZoom={0.06}
         maxZoom={2.5}

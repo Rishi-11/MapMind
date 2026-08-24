@@ -133,7 +133,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
 
   const handleLabelChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setLabel(e.target.value);
-    onUpdateNode(selectedNode.id, { label: e.target.value });
+    onUpdateNode(selectedNode.id, { label: e.target.value, title: e.target.value });
   };
 
   const handleSublabelChange = (e: React.ChangeEvent<HTMLInputElement>) => {

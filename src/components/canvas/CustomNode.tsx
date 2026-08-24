@@ -311,8 +311,9 @@ export interface CustomNodeProps extends NodeProps {
     onToggleCollapse?: (nodeId: string) => void;
     onToggleLock?: (nodeId: string) => void;
     onUpdateLabel?: (nodeId: string, label: string) => void;
-    onAddChild?: (nodeId: string) => void;
-    onAddSibling?: (nodeId: string) => void;
+    onCommitLabel?: (nodeId: string, label: string, action?: 'none' | 'add-child' | 'add-sibling') => void;
+    onAddChild?: (nodeId: string, labelToCommit?: string) => void;
+    onAddSibling?: (nodeId: string, labelToCommit?: string) => void;
     onStartEditing?: (nodeId: string) => void;
     onStopEditing?: (nodeId: string) => void;
     onSelect?: (nodeId: string) => void;
@@ -322,9 +323,13 @@ export interface CustomNodeProps extends NodeProps {
 
 const CustomNodeComponent = ({ id, data, selected }: CustomNodeProps) => {
   const [internalEditing, setInternalEditing] = useState(Boolean(data.isEditing));
-  const [labelValue, setLabelValue] = useState(data.label || 'Node');
+  const [labelValue, setLabelValue] = useState(data.label || data.title || '');
+  const labelValueRef = useRef(data.label || data.title || '');
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const dataRef = useRef(data);
+  dataRef.current = data;
+  const isCommittingRef = useRef(false);
   const [dimensions, setDimensions] = useState({ width: 190, height: 75 });
 
   const isCollapsed = Boolean(data.collapsed);
@@ -339,6 +344,7 @@ const CustomNodeComponent = ({ id, data, selected }: CustomNodeProps) => {
   const theme = COLOR_CLASSES[colorTheme] || COLOR_CLASSES.slate;
 
   const isEditing = Boolean(data.isEditing) || internalEditing;
+  const prevIsEditingRef = useRef(isEditing);
   const isCustomSvgShape = (shape === 'diamond' || shape === 'cloud') && !isSketch;
 
   // Track dark theme reactively
@@ -356,14 +362,20 @@ const CustomNodeComponent = ({ id, data, selected }: CustomNodeProps) => {
   }, []);
 
   useEffect(() => {
-    setLabelValue(data.label || '');
-  }, [data.label]);
-
-  useEffect(() => {
     if (data.isEditing !== undefined) {
       setInternalEditing(Boolean(data.isEditing));
     }
   }, [data.isEditing]);
+
+  // Synchronize local input state only when not actively editing or when entering editing mode
+  useEffect(() => {
+    if (!isEditing || (!prevIsEditingRef.current && isEditing)) {
+      const initial = data.label || data.title || '';
+      setLabelValue(initial);
+      labelValueRef.current = initial;
+    }
+    prevIsEditingRef.current = isEditing;
+  }, [data.label, data.title, isEditing]);
 
   useEffect(() => {
     if (containerRef.current) {
@@ -373,7 +385,7 @@ const CustomNodeComponent = ({ id, data, selected }: CustomNodeProps) => {
         height: Math.max(el.offsetHeight, shape === 'diamond' ? 90 : shape === 'cloud' ? 80 : 65),
       });
     }
-  }, [data.label, data.sublabel, data.tags, isCollapsed, isEditing, isLocked, shape, cardStyle]);
+  }, [data.label, data.title, data.sublabel, data.tags, isCollapsed, isEditing, isLocked, shape, cardStyle]);
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -403,22 +415,35 @@ const CustomNodeComponent = ({ id, data, selected }: CustomNodeProps) => {
   }, [isEditing]);
 
   const handleFinishEditing = useCallback(
-    (action?: 'none' | 'add-child' | 'add-sibling') => {
+    (action: 'none' | 'add-child' | 'add-sibling' = 'none') => {
+      if (isCommittingRef.current) return;
+      isCommittingRef.current = true;
+
       setInternalEditing(false);
-      data.onStopEditing?.(id);
 
-      const trimmed = labelValue.trim() || 'Untitled Node';
-      if (trimmed !== data.label) {
-        data.onUpdateLabel?.(id, trimmed);
+      const currentData = dataRef.current;
+      const currentVal = inputRef.current ? inputRef.current.value : (labelValueRef.current ?? labelValue);
+      const trimmed = currentVal.trim() || currentData.label || currentData.title || 'Untitled Node';
+
+      if (currentData.onCommitLabel) {
+        currentData.onCommitLabel(id, trimmed, action);
+      } else {
+        currentData.onStopEditing?.(id);
+        if (trimmed !== currentData.label) {
+          currentData.onUpdateLabel?.(id, trimmed);
+        }
+        if (action === 'add-child') {
+          currentData.onAddChild?.(id, trimmed);
+        } else if (action === 'add-sibling') {
+          currentData.onAddSibling?.(id, trimmed);
+        }
       }
 
-      if (action === 'add-child') {
-        data.onAddChild?.(id);
-      } else if (action === 'add-sibling') {
-        data.onAddSibling?.(id);
-      }
+      setTimeout(() => {
+        isCommittingRef.current = false;
+      }, 60);
     },
-    [id, labelValue, data]
+    [id, labelValue]
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -433,29 +458,39 @@ const CustomNodeComponent = ({ id, data, selected }: CustomNodeProps) => {
     } else if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
-      setLabelValue(data.label || '');
+      setLabelValue(dataRef.current.label || dataRef.current.title || '');
       setInternalEditing(false);
-      data.onStopEditing?.(id);
+      dataRef.current.onStopEditing?.(id);
     }
   };
 
   const handleToggle = (e: React.MouseEvent) => {
     e.stopPropagation();
-    data.onToggleCollapse?.(id);
+    if (isEditing) {
+      handleFinishEditing('none');
+    }
+    dataRef.current.onToggleCollapse?.(id);
   };
 
   const handleToggleLock = (e: React.MouseEvent) => {
     e.stopPropagation();
-    data.onToggleLock?.(id);
+    if (isEditing) {
+      handleFinishEditing('none');
+    }
+    dataRef.current.onToggleLock?.(id);
   };
 
   const handleAddChild = (e: React.MouseEvent) => {
     e.stopPropagation();
-    data.onAddChild?.(id);
+    if (isEditing) {
+      handleFinishEditing('add-child');
+    } else {
+      dataRef.current.onAddChild?.(id);
+    }
   };
 
   const handleNodeClick = () => {
-    data.onSelect?.(id);
+    dataRef.current.onSelect?.(id);
   };
 
   const isDimmed = Boolean(data.isDimmed);
@@ -472,8 +507,29 @@ const CustomNodeComponent = ({ id, data, selected }: CustomNodeProps) => {
     return (
       <div
         ref={containerRef}
+        tabIndex={0}
         onClick={handleNodeClick}
-        className={`min-w-[130px] max-w-[240px] px-3 py-2 rounded-xl ${theme.bg} ${theme.border} border-2 shadow-sm flex items-center justify-between gap-2 select-none transition-all duration-200 ${
+        onKeyDown={(e) => {
+          const isSpace =
+            e.key === ' ' ||
+            e.key === 'Spacebar' ||
+            e.key === 'Space' ||
+            e.code === 'Space' ||
+            e.keyCode === 32;
+          const isF2 = e.key === 'F2' || e.code === 'F2' || e.keyCode === 113;
+          if (isSpace || isF2) {
+            e.preventDefault();
+            e.stopPropagation();
+            setInternalEditing(true);
+            dataRef.current.onStartEditing?.(id);
+          }
+        }}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          setInternalEditing(true);
+          dataRef.current.onStartEditing?.(id);
+        }}
+        className={`min-w-[130px] max-w-[240px] px-3 py-2 rounded-xl outline-none ${theme.bg} ${theme.border} border-2 shadow-sm flex items-center justify-between gap-2 select-none transition-all duration-200 cursor-pointer ${
           isDimmed ? 'opacity-15 grayscale pointer-events-none' : 'opacity-100'
         } ${
           selected
@@ -495,7 +551,7 @@ const CustomNodeComponent = ({ id, data, selected }: CustomNodeProps) => {
         <div className="flex items-center gap-1.5 min-w-0">
           <span className={`w-2 h-2 rounded-full ${theme.accent} shrink-0`} />
           <span className={`text-xs font-bold truncate ${theme.text}`}>
-            {data.label || 'Untitled'}
+            {data.label || data.title || 'Untitled'}
           </span>
         </div>
 
@@ -557,6 +613,7 @@ const CustomNodeComponent = ({ id, data, selected }: CustomNodeProps) => {
   return (
     <div
       ref={containerRef}
+      tabIndex={0}
       onClick={handleNodeClick}
       className={`group relative ${
         shape === 'diamond'
@@ -564,7 +621,7 @@ const CustomNodeComponent = ({ id, data, selected }: CustomNodeProps) => {
           : shape === 'cloud'
           ? 'w-[190px] min-h-[80px]'
           : 'w-[185px] max-w-[210px]'
-      } transition-all duration-200 select-none ${
+      } transition-all duration-200 select-none outline-none ${
         isCustomSvgShape ? 'overflow-visible' : 'overflow-hidden'
       } ${
         isSketch
@@ -583,10 +640,27 @@ const CustomNodeComponent = ({ id, data, selected }: CustomNodeProps) => {
           ? 'ring-2 ring-indigo-500 shadow-[0_0_20px_rgba(99,102,241,0.35)] z-20'
           : 'hover:scale-[1.01]'
       } ${isLocked ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}`}
+      onKeyDown={(e) => {
+        if (!isEditing) {
+          const isSpace =
+            e.key === ' ' ||
+            e.key === 'Spacebar' ||
+            e.key === 'Space' ||
+            e.code === 'Space' ||
+            e.keyCode === 32;
+          const isF2 = e.key === 'F2' || e.code === 'F2' || e.keyCode === 113;
+          if (isSpace || isF2) {
+            e.preventDefault();
+            e.stopPropagation();
+            setInternalEditing(true);
+            dataRef.current.onStartEditing?.(id);
+          }
+        }
+      }}
       onDoubleClick={(e) => {
         e.stopPropagation();
         setInternalEditing(true);
-        data.onStartEditing?.(id);
+        dataRef.current.onStartEditing?.(id);
       }}
     >
       {/* 💎 Authentic 4-Point Diamond (Rhombus) Background */}
@@ -809,7 +883,12 @@ const CustomNodeComponent = ({ id, data, selected }: CustomNodeProps) => {
             autoFocus
             type="text"
             value={labelValue}
-            onChange={(e) => setLabelValue(e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              setLabelValue(val);
+              labelValueRef.current = val;
+              dataRef.current.onUpdateLabel?.(id, val);
+            }}
             onFocus={(e) => {
               e.target.select();
             }}
@@ -823,9 +902,18 @@ const CustomNodeComponent = ({ id, data, selected }: CustomNodeProps) => {
             className={`text-[13.5px] font-bold tracking-tight leading-snug cursor-text break-words ${theme.text} ${
               isSketch ? 'text-base font-bold font-sketch' : ''
             } ${cardStyle === 'bold' ? 'font-extrabold text-[14px]' : ''} ${shape === 'diamond' || shape === 'cloud' ? 'text-center' : ''}`}
-            title="Double-click or press Space to edit"
+            title="Double-click or press Space / F2 to edit"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleNodeClick();
+            }}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              setInternalEditing(true);
+              dataRef.current.onStartEditing?.(id);
+            }}
           >
-            {data.label || 'Untitled Node'}
+            {data.label || data.title || 'Untitled Node'}
           </div>
         )}
 
@@ -881,6 +969,7 @@ function areNodesEqual(prev: CustomNodeProps, next: CustomNodeProps): boolean {
 
   if (
     p.label !== n.label ||
+    p.title !== n.title ||
     p.sublabel !== n.sublabel ||
     p.colorTheme !== n.colorTheme ||
     p.shape !== n.shape ||

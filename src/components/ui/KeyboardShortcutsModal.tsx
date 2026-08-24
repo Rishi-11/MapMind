@@ -51,6 +51,7 @@ const SHORTCUT_GROUPS = [
   {
     category: 'Node Actions & Whiteboard Operations',
     items: [
+      { key: 't or #', desc: 'Add / manage tags on selected node' },
       { key: 'Delete / Backspace', desc: 'Delete node and select its direct parent' },
       { key: 'c or /', desc: 'Collapse / Expand subtree of selected node' },
       { key: 'Alt + Drag (node)', desc: 'Manual override: Intentionally overlap elements' },
