@@ -8,7 +8,21 @@ interface KeyboardShortcutsModalProps {
 
 const SHORTCUT_GROUPS = [
   {
-    category: 'Node Creation & Thought Flow',
+    category: 'Vault & Application Navigation',
+    items: [
+      { key: 'Ctrl + 1..6', desc: 'Switch Views: 1-Notes, 2-MindMap, 3-Graph, 4-Study, 5-Tasks, 6-Hub' },
+      { key: 'Ctrl + Alt + N', desc: 'Create New Knowledge Vault' },
+      { key: 'Ctrl + Alt + V', desc: 'Open Vault Switcher & Management Modal' },
+      { key: 'Ctrl + S', desc: 'Save / Export Active Vault JSON Backup' },
+      { key: 'Ctrl + O', desc: 'Open / Import Vault JSON File' },
+      { key: 'Ctrl + K / Ctrl + P', desc: 'Fuzzy Search Command Palette to find any note or action' },
+      { key: 'Ctrl + N', desc: 'Create New Markdown Note' },
+      { key: 'Ctrl + D', desc: "Open Today's Daily Note" },
+      { key: '[[', desc: 'WikiLink autocomplete & instant note creator' },
+    ],
+  },
+  {
+    category: 'Node Creation & Thought Flow (Mind Map)',
     items: [
       { key: 'Tab', desc: 'Add Child node and start editing immediately' },
       { key: 'Enter', desc: 'Add Sibling node (same parent) and start editing' },
@@ -19,7 +33,7 @@ const SHORTCUT_GROUPS = [
     ],
   },
   {
-    category: 'Edge Labeling & Path Conditions (Keyboard-First)',
+    category: 'Edge Labeling & Path Conditions',
     items: [
       { key: 'e or l', desc: 'Edit text label/comment on connection line from parent' },
       { key: 'Enter / F2 (on edge)', desc: 'Edit text of currently selected edge/connection' },
@@ -37,27 +51,12 @@ const SHORTCUT_GROUPS = [
     ],
   },
   {
-    category: 'Large-Scale Graph & Presentation Navigation',
-    items: [
-      { key: 'Ctrl + K (or Cmd + K)', desc: 'Fuzzy Search Command Palette to find and fly to any node' },
-      { key: 'f', desc: 'Toggle Subtree Spotlight Focus (dim unrelated branches)' },
-      { key: 'Shift + F', desc: 'Fit full whiteboard in view' },
-      { key: 'F5 or p', desc: 'Start Step-by-Step Presentation Tour mode' },
-      { key: 'o', desc: 'Toggle Outline & Branch Tree Navigator' },
-      { key: 'Space / → (in tour)', desc: 'Advance to next slide / topic in presentation' },
-      { key: '← (in tour)', desc: 'Go back to previous slide in presentation' },
-    ],
-  },
-  {
     category: 'Node Actions & Whiteboard Operations',
     items: [
       { key: 't or #', desc: 'Add / manage tags on selected node' },
       { key: 'Delete / Backspace', desc: 'Delete node and select its direct parent' },
       { key: 'c or /', desc: 'Collapse / Expand subtree of selected node' },
       { key: 'Alt + Drag (node)', desc: 'Manual override: Intentionally overlap elements' },
-      { key: 'Ctrl + S', desc: 'Silent Save to file (retains handle)' },
-      { key: 'Ctrl + Shift + S', desc: 'Save As new diagram file' },
-      { key: 'Ctrl + O', desc: 'Open diagram file from disk' },
       { key: '?', desc: 'Toggle this Keyboard Shortcuts guide' },
     ],
   },

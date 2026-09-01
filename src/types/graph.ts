@@ -36,6 +36,9 @@ export interface CustomNodeData extends Record<string, unknown> {
   notes?: string;
   isEditing?: boolean;
   locked?: boolean;
+  pageId?: string;
+  linkedNoteTitle?: string;
+  wikiLinks?: string[];
 }
 
 export type EdgeRoutingStyle = 'curved' | 'smoothstep' | 'straight' | 'step';

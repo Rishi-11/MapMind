@@ -5,35 +5,60 @@ import {
   useReactFlow,
   ReactFlowProvider,
 } from '@xyflow/react';
+import { BookOpen } from 'lucide-react';
 
-import { MapMindNode, MapMindEdge, CanvasSettings, LayoutDirection, LayoutDensity } from '@/types/graph';
+import { MapMindNode, MapMindEdge, CanvasSettings, LayoutDirection, LayoutDensity, NodeColorTheme } from '@/types/graph';
+import { Workspace, Page, Section, Notebook, ViewMode, BacklinkItem, UnlinkedMentionItem } from '@/types/notebook';
+import { AiConnectionSuggestion } from '@/types/ai';
+
 import { DiagramCanvas } from '@/components/canvas/DiagramCanvas';
 import { HeaderToolbar } from '@/components/ui/HeaderToolbar';
 import { NodeInspector } from '@/components/ui/NodeInspector';
-import { Breadcrumbs } from '@/components/ui/Breadcrumbs';
 import { FloatingActionDock } from '@/components/ui/FloatingActionDock';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+import { UnifiedHeader } from '@/components/ui/UnifiedHeader';
+import { UniversalCommandPalette } from '@/components/ui/UniversalCommandPalette';
 
-// 🚀 Lazy-Loaded Heavy Modals & Drawers (Fetched on demand for instant initial load)
+import { NotebookSidebar } from '@/components/notebook/NotebookSidebar';
+import { MarkdownEditor } from '@/components/notebook/MarkdownEditor';
+import { NotebookInspectorPanel } from '@/components/notebook/NotebookInspectorPanel';
+import { KnowledgeGraphView } from '@/components/notebook/KnowledgeGraphView';
+import { StudyHubView } from '@/components/notebook/StudyHubView';
+import { TasksView } from '@/components/notebook/TasksView';
+import { DashboardView } from '@/components/notebook/DashboardView';
+
+import {
+  loadWorkspace,
+  saveWorkspace,
+  exportWorkspaceAsJson,
+  exportAllVaultsBackupBundle,
+  wipeAllLocalDeviceData,
+  listAllVaults,
+  loadVaultById,
+  createNewVault,
+  deleteVaultById,
+  importVaultFromJsonFile,
+  ONBOARDING_GUIDE_VAULT,
+  INITIAL_STARTER_WORKSPACE,
+  VaultMetadata,
+} from '@/lib/notebook/storage';
+import { VaultManagerModal } from '@/components/notebook/VaultManagerModal';
+import { buildBacklinkIndex, detectUnlinkedMentions, convertMentionToWikiLink } from '@/lib/notebook/links';
+import { discoverAiSuggestions } from '@/lib/notebook/knowledgeAiEngine';
+import { markdownToMindMap, mindMapToMarkdown } from '@/lib/notebook/mindmapBridge';
+
+// 🚀 Lazy-Loaded Heavy Modals
 const ExportMenu = lazy(() => import('@/components/ui/ExportMenu').then((m) => ({ default: m.ExportMenu })));
-const TimeMachineModal = lazy(() => import('@/components/ui/TimeMachineModal').then((m) => ({ default: m.TimeMachineModal })));
 const KeyboardShortcutsModal = lazy(() => import('@/components/ui/KeyboardShortcutsModal').then((m) => ({ default: m.KeyboardShortcutsModal })));
 const CanvasThemeModal = lazy(() => import('@/components/ui/CanvasThemeModal').then((m) => ({ default: m.CanvasThemeModal })));
 const CleanBoardModal = lazy(() => import('@/components/ui/CleanBoardModal').then((m) => ({ default: m.CleanBoardModal })));
 const AiChatMindMapModal = lazy(() => import('@/components/ui/AiChatMindMapModal').then((m) => ({ default: m.AiChatMindMapModal })));
-const PresentationMode = lazy(() => import('@/components/ui/PresentationMode').then((m) => ({ default: m.PresentationMode })));
-const OutlineNavigatorDrawer = lazy(() => import('@/components/ui/OutlineNavigatorDrawer').then((m) => ({ default: m.OutlineNavigatorDrawer })));
-const SearchModal = lazy(() => import('@/components/ui/SearchModal').then((m) => ({ default: m.SearchModal })));
 const NodeExpansionModal = lazy(() => import('@/components/ui/NodeExpansionModal').then((m) => ({ default: m.NodeExpansionModal })));
-const QuickTagModal = lazy(() => import('@/components/ui/QuickTagModal').then((m) => ({ default: m.QuickTagModal })));
-import { useAutoSaveHistory } from '@/hooks/useAutoSaveHistory';
-import { useFileSystem } from '@/hooks/useFileSystem';
+
 import { getDagreLayout } from '@/lib/layouts/dagreLayout';
 import { getElkLayout } from '@/lib/layouts/elkLayout';
-import { computeBranchMetrics, computeSpotlightSet } from '@/lib/branchUtils';
-import { resolveNodeDragCollision } from '@/lib/collision/collisionAvoidance';
 
-// Initial Starter Mind Map Template
+// Initial Starter Mind Map Nodes
 const INITIAL_NODES: MapMindNode[] = [
   {
     id: 'root-1',
@@ -41,147 +66,92 @@ const INITIAL_NODES: MapMindNode[] = [
     position: { x: 0, y: 0 },
     selected: true,
     data: {
-      label: 'MapMind Architecture',
-      sublabel: 'Client-Side Interactive Canvas',
+      label: 'MapMind Knowledge Studio',
+      sublabel: 'Interactive Mind Mapping & Local-First Notes',
       isRoot: true,
       colorTheme: 'blue',
       shape: 'pill',
-      tags: ['Core', 'React 18'],
+      tags: ['Core', 'Local-First'],
     },
   },
   {
-    id: 'node-storage',
+    id: 'node-notes',
     type: 'custom',
-    position: { x: 300, y: -100 },
+    position: { x: 320, y: -100 },
     data: {
-      label: 'Storage & Persistence',
-      sublabel: 'Local File & IDB Engine',
-      colorTheme: 'emerald',
-      tags: ['Storage'],
-    },
-  },
-  {
-    id: 'node-storage-fs',
-    type: 'custom',
-    position: { x: 580, y: -150 },
-    data: {
-      label: 'browser-fs-access',
-      sublabel: 'Silent Ctrl+S Overwrite',
-      colorTheme: 'emerald',
-      tags: ['File System'],
-    },
-  },
-  {
-    id: 'node-storage-idb',
-    type: 'custom',
-    position: { x: 580, y: -50 },
-    data: {
-      label: 'IndexedDB Time Machine',
-      sublabel: '3-Min Auto Snapshots',
-      colorTheme: 'emerald',
-      tags: ['Revisions'],
-    },
-  },
-  {
-    id: 'node-layouts',
-    type: 'custom',
-    position: { x: -300, y: -100 },
-    data: {
-      label: 'Layout Engines',
-      sublabel: 'Automatic Graph Math',
+      label: 'Knowledge Notebook',
+      sublabel: 'Markdown, Backlinks & Tags',
       colorTheme: 'purple',
-      tags: ['Algorithms'],
+      tags: ['Notebook'],
     },
   },
   {
-    id: 'node-layouts-dagre',
+    id: 'node-mindmap',
     type: 'custom',
-    position: { x: -580, y: -150 },
+    position: { x: 320, y: 100 },
     data: {
-      label: 'Dagre Layouts',
-      sublabel: 'Top-Down & Left-Right DAG',
-      colorTheme: 'purple',
-      tags: ['Dagre'],
+      label: 'Visual Whiteboard',
+      sublabel: 'Radial, Dagre & ELK Trees',
+      colorTheme: 'emerald',
+      tags: ['MindMap'],
     },
   },
   {
-    id: 'node-layouts-elk',
+    id: 'node-ai',
     type: 'custom',
-    position: { x: -580, y: -50 },
+    position: { x: -320, y: -80 },
     data: {
-      label: 'ELK.js Radial Map',
-      sublabel: 'Balanced Left/Right Tree',
-      colorTheme: 'purple',
-      tags: ['ELK'],
-    },
-  },
-  {
-    id: 'node-export',
-    type: 'custom',
-    position: { x: 300, y: 120 },
-    data: {
-      label: 'Rendering & Aesthetics',
-      sublabel: 'RoughJS & Multi-Format',
+      label: 'Local Multi-Signal AI',
+      sublabel: 'Connection Reasoning & RAG',
       colorTheme: 'amber',
-      tags: ['Export'],
+      tags: ['AI'],
     },
   },
   {
-    id: 'node-export-rough',
+    id: 'node-study',
     type: 'custom',
-    position: { x: 580, y: 80 },
+    position: { x: -320, y: 80 },
     data: {
-      label: 'Sketch Mode',
-      sublabel: 'Hand-Drawn RoughJS SVG',
-      colorTheme: 'amber',
-      tags: ['Aesthetics'],
-    },
-  },
-  {
-    id: 'node-export-pdf',
-    type: 'custom',
-    position: { x: 580, y: 170 },
-    data: {
-      label: 'jsPDF & Clipboard PNG',
-      sublabel: 'Vector & Raster Exports',
-      colorTheme: 'amber',
-      tags: ['PDF', 'PNG'],
+      label: 'Study & Learning Hub',
+      sublabel: 'Spaced Repetition & Quizzes',
+      colorTheme: 'rose',
+      tags: ['Learning'],
     },
   },
 ];
 
 const INITIAL_EDGES: MapMindEdge[] = [
-  { id: 'e-root-storage', source: 'root-1', target: 'node-storage', type: 'custom' },
-  { id: 'e-storage-fs', source: 'node-storage', target: 'node-storage-fs', type: 'custom', data: { label: 'Direct FS' } },
-  { id: 'e-storage-idb', source: 'node-storage', target: 'node-storage-idb', type: 'custom', data: { label: 'Backup' } },
-  { id: 'e-root-layouts', source: 'root-1', target: 'node-layouts', type: 'custom' },
-  { id: 'e-layouts-dagre', source: 'node-layouts', target: 'node-layouts-dagre', type: 'custom', data: { label: 'DAG Tree' } },
-  { id: 'e-layouts-elk', source: 'node-layouts', target: 'node-layouts-elk', type: 'custom', data: { label: 'Radial Tree' } },
-  { id: 'e-root-export', source: 'root-1', target: 'node-export', type: 'custom' },
-  { id: 'e-export-rough', source: 'node-export', target: 'node-export-rough', type: 'custom', data: { label: 'RoughJS' } },
-  { id: 'e-export-pdf', source: 'node-export', target: 'node-export-pdf', type: 'custom', data: { label: 'PDF Vector' } },
+  { id: 'e-root-notes', source: 'root-1', target: 'node-notes', type: 'custom', data: { routingStyle: 'curved' } },
+  { id: 'e-root-mindmap', source: 'root-1', target: 'node-mindmap', type: 'custom', data: { routingStyle: 'curved' } },
+  { id: 'e-root-ai', source: 'root-1', target: 'node-ai', type: 'custom', data: { routingStyle: 'curved' } },
+  { id: 'e-root-study', source: 'root-1', target: 'node-study', type: 'custom', data: { routingStyle: 'curved' } },
 ];
 
 export function AppContent() {
+  // Application View Mode: 'editor' | 'mindmap' | 'graph' | 'study' | 'tasks' | 'dashboard'
+  const [viewMode, setViewMode] = useState<ViewMode>('editor');
+
+  // Unified Workspace State
+  const [workspace, setWorkspace] = useState<Workspace>(INITIAL_STARTER_WORKSPACE);
+  const [vaultList, setVaultList] = useState<VaultMetadata[]>([]);
+  const [isVaultManagerOpen, setIsVaultManagerOpen] = useState(false);
+  const [isAutoSaving, setIsAutoSaving] = useState(false);
+  const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+
+  // MapMind Canvas Graph State
   const [nodes, setNodes, onNodesChange] = useNodesState<MapMindNode>(INITIAL_NODES);
   const [edges, setEdges, onEdgesChange] = useEdgesState<MapMindEdge>(INITIAL_EDGES);
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>('root-1');
-  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [isCanvasThemeOpen, setIsCanvasThemeOpen] = useState(false);
   const [isCleanBoardOpen, setIsCleanBoardOpen] = useState(false);
   const [isAiImportOpen, setIsAiImportOpen] = useState(false);
   const [isAiExpandModalOpen, setIsAiExpandModalOpen] = useState(false);
   const [aiExpandTargetNodeId, setAiExpandTargetNodeId] = useState<string | null>(null);
-  const [isPresentationOpen, setIsPresentationOpen] = useState(false);
-  const [isOutlineOpen, setIsOutlineOpen] = useState(false);
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [isSpotlightActive, setIsSpotlightActive] = useState(false);
-  const [isTimeMachineOpen, setIsTimeMachineOpen] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
-  const [isQuickTagOpen, setIsQuickTagOpen] = useState(false);
-  const [isLayouting, setIsLayouting] = useState(false);
   const [currentLayout, setCurrentLayout] = useState<LayoutDirection>('BALANCED_MINDMAP');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
@@ -197,38 +167,94 @@ export function AppContent() {
     collisionAvoidance: true,
   });
 
-  const nodesRef = useRef(nodes);
-  const edgesRef = useRef(edges);
-  const selectedNodeIdRef = useRef(selectedNodeId);
-  const selectedEdgeIdRef = useRef(selectedEdgeId);
-  const currentLayoutRef = useRef(currentLayout);
-
-  useEffect(() => {
-    nodesRef.current = nodes;
-  }, [nodes]);
-
-  useEffect(() => {
-    edgesRef.current = edges;
-  }, [edges]);
-
-  useEffect(() => {
-    selectedNodeIdRef.current = selectedNodeId;
-  }, [selectedNodeId]);
-
-  useEffect(() => {
-    selectedEdgeIdRef.current = selectedEdgeId;
-  }, [selectedEdgeId]);
-
-  useEffect(() => {
-    currentLayoutRef.current = currentLayout;
-  }, [currentLayout]);
+  const { fitView } = useReactFlow();
 
   const showNotification = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   }, []);
 
-  // Sync dark theme with HTML element
+  const refreshVaultList = useCallback(async () => {
+    const list = await listAllVaults();
+    setVaultList(list);
+  }, []);
+
+  // Load Workspace on Initial Mount
+  useEffect(() => {
+    loadWorkspace().then((ws) => {
+      setWorkspace(ws);
+      refreshVaultList();
+    });
+  }, [refreshVaultList]);
+
+  // Debounced auto-save workspace to IndexedDB
+  const workspaceSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const persistWorkspace = useCallback((updated: Workspace) => {
+    setWorkspace(updated);
+    setIsAutoSaving(true);
+    if (workspaceSaveTimerRef.current) clearTimeout(workspaceSaveTimerRef.current);
+    workspaceSaveTimerRef.current = setTimeout(async () => {
+      await saveWorkspace(updated);
+      setIsAutoSaving(false);
+      refreshVaultList();
+    }, 600);
+  }, [refreshVaultList]);
+
+  // Multi-Vault Management Actions
+  const handleSwitchVault = useCallback(async (vaultId: string) => {
+    const loaded = await loadVaultById(vaultId);
+    if (loaded) {
+      setWorkspace(loaded);
+      showNotification(`Opened vault "${loaded.name}"`, 'success');
+      refreshVaultList();
+    }
+  }, [showNotification, refreshVaultList]);
+
+  const handleCreateVault = useCallback(async (name: string, template: 'empty' | 'guide') => {
+    const newV = createNewVault(name, template);
+    await saveWorkspace(newV);
+    setWorkspace(newV);
+    showNotification(`Created new vault "${name}"`, 'success');
+    refreshVaultList();
+  }, [showNotification, refreshVaultList]);
+
+  const handleExportCurrentVault = useCallback(() => {
+    if (!workspace) return;
+    exportWorkspaceAsJson(workspace);
+    showNotification(`Exported backup for "${workspace.name}"`, 'success');
+  }, [workspace, showNotification]);
+
+  const handleExportAllVaultsBundle = useCallback(async () => {
+    await exportAllVaultsBackupBundle();
+    showNotification('Exported complete multi-vault backup bundle!', 'success');
+  }, [showNotification]);
+
+  const handleWipeDeviceData = useCallback(async () => {
+    await wipeAllLocalDeviceData();
+    await saveWorkspace(ONBOARDING_GUIDE_VAULT);
+    setWorkspace(ONBOARDING_GUIDE_VAULT);
+    refreshVaultList();
+    showNotification('All local data wiped. Reset to initial guide.', 'info');
+  }, [showNotification, refreshVaultList]);
+
+  const handleImportVaultFile = useCallback(async (file: File) => {
+    try {
+      const imported = await importVaultFromJsonFile(file);
+      setWorkspace(imported);
+      showNotification(`Successfully imported "${imported.name}"!`, 'success');
+      refreshVaultList();
+    } catch (err: any) {
+      showNotification(err.message || 'Failed to import vault file.', 'error');
+    }
+  }, [showNotification, refreshVaultList]);
+
+  const handleDeleteVault = useCallback(async (vaultId: string) => {
+    await deleteVaultById(vaultId);
+    showNotification('Vault deleted.', 'info');
+    refreshVaultList();
+  }, [showNotification, refreshVaultList]);
+
+  // Theme Sync
   useEffect(() => {
     if (settings.theme === 'dark') {
       document.documentElement.classList.add('dark');
@@ -237,1568 +263,1178 @@ export function AppContent() {
     }
   }, [settings.theme]);
 
-  // Dynamic metrics: Branch Color Inheritance, Recursive Descendant Count, and Subtree Spotlight Dimming
-  const nodesWithChildCounts = useMemo(() => {
-    const metrics = computeBranchMetrics(nodes, edges);
-    const spotlightSet = isSpotlightActive
-      ? computeSpotlightSet(selectedNodeId, nodes, edges)
-      : null;
-
-    return nodes.map((node) => {
-      const childCount = metrics.childrenMap.get(node.id)?.length || 0;
-      const descendantCount = metrics.descendantCountMap.get(node.id) || 0;
-      const inheritedColor = metrics.inheritedColorMap.get(node.id);
-
-      // Node color: explicit user color > inherited branch pillar color > fallback 'blue'
-      const colorTheme = (node.data?.colorTheme || inheritedColor || 'blue');
-
-      const isDimmed = Boolean(isSpotlightActive && spotlightSet && !spotlightSet.has(node.id));
-      const isSpotlightTarget = Boolean(isSpotlightActive && node.id === selectedNodeId);
-
-      return {
-        ...node,
-        selected: node.id === selectedNodeId,
-        data: {
-          ...node.data,
-          colorTheme,
-          childCount,
-          descendantCount,
-          isDimmed,
-          isSpotlightTarget,
-        },
-      };
+  // Flatten all pages across workspace
+  const allPages = useMemo(() => {
+    if (!workspace) return [];
+    const list: Page[] = [];
+    workspace.notebooks.forEach((nb) => {
+      nb.sections.forEach((sec) => {
+        list.push(...sec.pages);
+      });
     });
-  }, [nodes, edges, selectedNodeId, isSpotlightActive]);
+    return list;
+  }, [workspace]);
 
-  const selectedNode = useMemo(() => {
-    return nodes.find((n) => n.id === selectedNodeId) || null;
-  }, [nodes, selectedNodeId]);
+  // Notebook & Section lookup maps
+  const { notebookMap, sectionMap } = useMemo(() => {
+    const nbMap = new Map<string, string>();
+    const secMap = new Map<string, string>();
+    if (workspace) {
+      workspace.notebooks.forEach((nb) => {
+        nbMap.set(nb.id, nb.name);
+        nb.sections.forEach((sec) => {
+          secMap.set(sec.id, sec.name);
+        });
+      });
+    }
+    return { notebookMap: nbMap, sectionMap: secMap };
+  }, [workspace]);
 
-  const incomingEdge = useMemo(() => {
-    if (!selectedNodeId) return null;
-    return edges.find((e) => e.target === selectedNodeId) || null;
-  }, [edges, selectedNodeId]);
+  // Active page
+  const activePage: Page | null = useMemo(() => {
+    if (!workspace || !workspace.activePageId) return allPages[0] || null;
+    return allPages.find((p) => p.id === workspace.activePageId) || allPages[0] || null;
+  }, [workspace, allPages]);
 
-  // Edge manipulation handlers
-  const handleUpdateEdgeLabel = useCallback(
-    (edgeId: string, label: string) => {
-      setEdges((eds) =>
-        eds.map((e) =>
-          e.id === edgeId
-            ? {
-                ...e,
-                label,
-                data: {
-                  ...e.data,
-                  label,
-                },
-              }
-            : e
-        )
-      );
+  // Backlinks & Unlinked Mentions for active page
+  const backlinks: BacklinkItem[] = useMemo(() => {
+    if (!activePage || allPages.length === 0) return [];
+    const map = buildBacklinkIndex(allPages, notebookMap, sectionMap);
+    return map.get(activePage.id) || [];
+  }, [activePage, allPages, notebookMap, sectionMap]);
+
+  const unlinkedMentions: UnlinkedMentionItem[] = useMemo(() => {
+    if (!activePage || allPages.length === 0) return [];
+    return detectUnlinkedMentions(activePage, allPages, notebookMap, sectionMap);
+  }, [activePage, allPages, notebookMap, sectionMap]);
+
+  // AI Connection Suggestions for active page
+  const aiSuggestions: AiConnectionSuggestion[] = useMemo(() => {
+    if (!activePage || allPages.length < 2 || !workspace) return [];
+    return discoverAiSuggestions(
+      activePage,
+      allPages,
+      workspace.settings.aiConnectionMode,
+      workspace.settings.aiConfidenceThreshold
+    );
+  }, [activePage, allPages, workspace]);
+
+  // Workspace CRUD Operations
+  const handleSelectPage = useCallback(
+    (notebookId: string, sectionId: string, pageId: string) => {
+      if (!workspace) return;
+      persistWorkspace({
+        ...workspace,
+        activeNotebookId: notebookId,
+        activeSectionId: sectionId,
+        activePageId: pageId,
+      });
     },
-    [setEdges]
+    [workspace, persistWorkspace]
   );
 
-  const handleStartEditingEdge = useCallback(
-    (edgeId: string) => {
-      setSelectedEdgeId(edgeId);
-      setSelectedNodeId(null);
-      setEdges((eds) =>
-        eds.map((e) => ({
-          ...e,
-          data: {
-            ...e.data,
-            isEditing: e.id === edgeId,
-          },
-        }))
-      );
-    },
-    [setEdges]
-  );
-
-  const handleStopEditingEdge = useCallback(
-    (edgeId: string) => {
-      setEdges((eds) =>
-        eds.map((e) =>
-          e.id === edgeId
-            ? {
-                ...e,
-                data: {
-                  ...e.data,
-                  isEditing: false,
-                },
-              }
-            : e
-        )
-      );
-    },
-    [setEdges]
-  );
-
-  const handleDeleteEdge = useCallback(
-    (edgeId: string) => {
-      setEdges((eds) => eds.filter((e) => e.id !== edgeId));
-      setSelectedEdgeId(null);
-      showNotification('Deleted connection line', 'info');
-    },
-    [setEdges, showNotification]
-  );
-
-  const { setCenter, getZoom, fitView } = useReactFlow();
-
-  const centerOnNode = useCallback(
-    (nodeId: string, duration = 300, customZoom?: number) => {
-      const target = nodesRef.current.find((n) => n.id === nodeId);
-      if (target) {
-        const currentZoom = getZoom();
-        const zoom = customZoom !== undefined ? customZoom : Math.max(currentZoom, 1.0);
-        setCenter(target.position.x + 115, target.position.y + 48, { zoom, duration });
+  const handleSelectNotebook = useCallback(
+    (notebookId: string) => {
+      if (!workspace) return;
+      const nb = workspace.notebooks.find((n) => n.id === notebookId);
+      if (nb) {
+        const sec = nb.sections[0];
+        const page = sec ? sec.pages[0] : null;
+        persistWorkspace({
+          ...workspace,
+          activeNotebookId: nb.id,
+          activeSectionId: sec ? sec.id : null,
+          activePageId: page ? page.id : null,
+        });
       }
     },
-    [setCenter, getZoom]
+    [workspace, persistWorkspace]
   );
 
-  // Restore state from File or Time Machine
-  const handleRestoreState = useCallback(
-    (newNodes: MapMindNode[], newEdges: MapMindEdge[]) => {
-      setNodes(newNodes);
-      setEdges(newEdges);
-      if (newNodes.length > 0) {
-        setSelectedNodeId(newNodes[0].id);
-        setTimeout(() => centerOnNode(newNodes[0].id), 50);
-      } else {
-        setSelectedNodeId(null);
-      }
-      showNotification('Canvas restored successfully', 'success');
-    },
-    [setNodes, setEdges, centerOnNode, showNotification]
-  );
+  const handleCreateNotebook = useCallback(
+    (name: string, icon: string, color: string) => {
+      if (!workspace) return;
+      const nbId = `nb-${Date.now()}`;
+      const secId = `sec-${Date.now()}-1`;
+      const pageId = `page-${Date.now()}-1`;
 
-  // Time Machine Hook (Auto-saves every 3 minutes to IndexedDB)
-  const {
-    snapshots,
-    secondsUntilNextSave,
-    deleteSnapshot,
-    clearHistory,
-    triggerSave,
-  } = useAutoSaveHistory(nodes, edges, handleRestoreState, 3 * 60 * 1000);
-
-  // File System Hook (Save / Silent Ctrl+S / Open)
-  const {
-    activeFileName,
-    isSaving,
-    handleSave,
-    handleOpen,
-    handleNew,
-  } = useFileSystem(
-    nodes,
-    edges,
-    (graph, fileName) => {
-      handleRestoreState(graph.nodes, graph.edges);
-      triggerSave('import', `Imported: ${fileName}`);
-    },
-    showNotification
-  );
-
-  // Clean / Clear Whiteboard (with automatic Time Machine safety snapshot)
-  const handleCleanBoard = useCallback(
-    (mode: 'fresh-root' | 'empty') => {
-      // 1. Take safety snapshot in Time Machine
-      triggerSave('manual-save', 'Before cleaning canvas');
-
-      if (mode === 'fresh-root') {
-        const rootId = `root_${Date.now()}`;
-        const freshRoot: MapMindNode = {
-          id: rootId,
-          type: 'custom',
-          position: { x: 0, y: 0 },
-          selected: true,
-          data: {
-            label: 'Central Topic',
-            title: 'Central Topic',
-            colorTheme: 'blue',
-            isRoot: true,
-            tags: ['Main'],
-            isEditing: true,
+      const newNb: Notebook = {
+        id: nbId,
+        name,
+        icon,
+        color,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        sections: [
+          {
+            id: secId,
+            notebookId: nbId,
+            name: 'General',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            pages: [
+              {
+                id: pageId,
+                notebookId: nbId,
+                sectionId: secId,
+                title: 'Overview',
+                pageType: 'concept',
+                tags: ['notes'],
+                properties: { type: 'concept', status: 'learning' },
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                content: `# ${name} Overview\n\nStart writing notes for ${name}...\n`,
+              },
+            ],
           },
+        ],
+      };
+
+      persistWorkspace({
+        ...workspace,
+        notebooks: [...workspace.notebooks, newNb],
+        activeNotebookId: newNb.id,
+        activeSectionId: newNb.sections[0].id,
+        activePageId: newNb.sections[0].pages[0].id,
+      });
+      setViewMode('editor');
+      showNotification(`Created notebook "${name}"`, 'success');
+    },
+    [workspace, persistWorkspace, showNotification]
+  );
+
+  const handleCreateSection = useCallback(
+    (notebookId: string, name: string) => {
+      if (!workspace) return;
+      const newSec: Section = {
+        id: `sec-${Date.now()}`,
+        notebookId,
+        name,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        pages: [],
+      };
+
+      const updatedNotebooks = workspace.notebooks.map((nb) =>
+        nb.id === notebookId ? { ...nb, sections: [...nb.sections, newSec] } : nb
+      );
+
+      persistWorkspace({ ...workspace, notebooks: updatedNotebooks, activeSectionId: newSec.id });
+      showNotification(`Added section "${name}"`, 'success');
+    },
+    [workspace, persistWorkspace, showNotification]
+  );
+
+  const handleCreatePage = useCallback(
+    (notebookId?: string, sectionId?: string, title = 'Untitled Note') => {
+      if (!workspace || workspace.notebooks.length === 0) return;
+
+      // 1. Resolve target notebook
+      const targetNbId = notebookId || workspace.activeNotebookId || workspace.notebooks[0]?.id;
+      const targetNb = workspace.notebooks.find((n) => n.id === targetNbId) || workspace.notebooks[0];
+      if (!targetNb) return;
+
+      // 2. Resolve target section within the target notebook
+      const targetSec =
+        (sectionId ? targetNb.sections.find((s) => s.id === sectionId) : null) ||
+        (workspace.activeSectionId ? targetNb.sections.find((s) => s.id === workspace.activeSectionId) : null) ||
+        targetNb.sections[0];
+
+      const newPageId = `page-${Date.now()}`;
+      const newSecId = targetSec ? targetSec.id : `sec-${Date.now()}`;
+
+      const newPage: Page = {
+        id: newPageId,
+        notebookId: targetNb.id,
+        sectionId: newSecId,
+        title,
+        pageType: 'note',
+        tags: [],
+        properties: { type: 'note', status: 'draft' },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        content: `# ${title}\n\nStart typing here...\n`,
+      };
+
+      let updatedNotebooks: Notebook[];
+
+      if (!targetSec) {
+        // If notebook had no sections at all, create a default "General" section with this new note
+        const createdSec: Section = {
+          id: newSecId,
+          notebookId: targetNb.id,
+          name: 'General',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          pages: [newPage],
         };
-        setNodes([freshRoot]);
-        setEdges([]);
-        setSelectedNodeId(rootId);
-        setTimeout(() => centerOnNode(rootId, 300), 50);
-        showNotification(
-          'Whiteboard reset with fresh topic. Backup saved to Time Machine.',
-          'success'
+        updatedNotebooks = workspace.notebooks.map((nb) =>
+          nb.id === targetNb.id ? { ...nb, sections: [createdSec] } : nb
         );
       } else {
-        setNodes([]);
-        setEdges([]);
-        setSelectedNodeId(null);
-        showNotification(
-          'Whiteboard wiped completely blank. Backup saved to Time Machine.',
-          'info'
-        );
-      }
-    },
-    [triggerSave, setNodes, setEdges, centerOnNode, showNotification]
-  );
-
-  // Apply AI Generated Mind Map
-  const handleApplyAiMindMap = useCallback(
-    (newNodes: MapMindNode[], newEdges: MapMindEdge[], replaceAll: boolean) => {
-      if (replaceAll) {
-        triggerSave('manual-save', 'Before AI Mind Map import');
-        setNodes(newNodes);
-        setEdges(newEdges);
-        if (newNodes.length > 0) {
-          setSelectedNodeId(newNodes[0].id);
-          setTimeout(() => centerOnNode(newNodes[0].id, 400), 50);
-        }
-        showNotification(
-          `Generated mind map with ${newNodes.length} nodes!`,
-          'success'
-        );
-      } else {
-        triggerSave('manual-save', 'Before AI Mind Map branch append');
-        setNodes(newNodes);
-        setEdges(newEdges);
-        showNotification(
-          `Appended AI branch to selected node!`,
-          'success'
-        );
-      }
-    },
-    [triggerSave, setNodes, setEdges, centerOnNode, showNotification]
-  );
-
-  // Open Context-Aware AI Node Expansion Modal
-  const handleOpenNodeExpansion = useCallback((nodeId: string) => {
-    setAiExpandTargetNodeId(nodeId);
-    setIsAiExpandModalOpen(true);
-  }, []);
-
-  // Apply Context-Aware AI Node Expansion
-  const handleApplyNodeExpansion = useCallback(
-    (updatedNodes: MapMindNode[], updatedEdges: MapMindEdge[], addedCount: number) => {
-      triggerSave('manual-save', `AI Expanded node with ${addedCount} sub-branches`);
-      setNodes(updatedNodes);
-      setEdges(updatedEdges);
-      showNotification(`Expanded branch with ${addedCount} new sub-nodes!`, 'success');
-      if (aiExpandTargetNodeId) {
-        setTimeout(() => centerOnNode(aiExpandTargetNodeId, 350), 50);
-      }
-    },
-    [triggerSave, setNodes, setEdges, showNotification, centerOnNode, aiExpandTargetNodeId]
-  );
-
-  // Start & Stop Inline Editing
-  const handleStartEditingNode = useCallback((nodeId: string) => {
-    setSelectedNodeId(nodeId);
-    setSelectedEdgeId(null);
-    setNodes((current) =>
-      current.map((n) => ({
-        ...n,
-        selected: n.id === nodeId,
-        data: {
-          ...n.data,
-          isEditing: n.id === nodeId,
-        },
-      }))
-    );
-  }, [setNodes]);
-
-  const handleStopEditingNode = useCallback((_nodeId: string) => {
-    setNodes((current) =>
-      current.map((n) => ({
-        ...n,
-        data: {
-          ...n.data,
-          isEditing: false,
-        },
-      }))
-    );
-  }, [setNodes]);
-
-  // Helper to re-calculate layout for visible nodes
-  const recalculateLayout = useCallback(
-    async (
-      targetNodes: MapMindNode[],
-      targetEdges: MapMindEdge[],
-      layoutMode: LayoutDirection = currentLayoutRef.current,
-      density = settings.layoutDensity
-    ): Promise<MapMindNode[]> => {
-      try {
-        if (layoutMode === 'BALANCED_MINDMAP') {
-          const res = await getElkLayout(targetNodes, targetEdges, { density });
-          return res.nodes;
-        } else {
-          const res = await getDagreLayout(targetNodes, targetEdges, {
-            direction: layoutMode as 'TB' | 'LR' | 'BT' | 'RL',
-            density,
-          });
-          return res.nodes;
-        }
-      } catch (err) {
-        console.warn('Layout recalculation error, falling back to Dagre LR:', err);
-        try {
-          const fallback = await getDagreLayout(targetNodes, targetEdges, {
-            direction: 'LR',
-            density,
-          });
-          return fallback.nodes;
-        } catch {
-          return targetNodes;
-        }
-      }
-    },
-    [settings.layoutDensity]
-  );
-
-  // Subtree Collapse/Expand Toggle Logic
-  const handleToggleCollapse = useCallback(
-    async (targetNodeId: string) => {
-      const currentNodes = nodesRef.current;
-      const currentEdges = edgesRef.current;
-      const targetNode = currentNodes.find((n) => n.id === targetNodeId);
-      if (!targetNode) return;
-
-      const nextCollapsed = !targetNode.data?.collapsed;
-
-      // When collapsing: hide ALL descendants recursively
-      // When expanding: unhide descendants where parent chain is not collapsed
-      const descendantsToUpdate = new Set<string>();
-
-      if (nextCollapsed) {
-        // Collapsing: collect all descendants to hide
-        const queue = [targetNodeId];
-        while (queue.length > 0) {
-          const parentId = queue.shift()!;
-          const childEdges = currentEdges.filter((e) => e.source === parentId && e.source !== e.target);
-          for (const edge of childEdges) {
-            if (!descendantsToUpdate.has(edge.target)) {
-              descendantsToUpdate.add(edge.target);
-              queue.push(edge.target);
-            }
-          }
-        }
-      } else {
-        // Expanding: unhide direct children and sub-branches if their direct parent is not collapsed
-        const nodeMap = new Map(currentNodes.map((n) => [n.id, n]));
-        const queue = [targetNodeId];
-        while (queue.length > 0) {
-          const parentId = queue.shift()!;
-          const parent = nodeMap.get(parentId);
-          if (parentId === targetNodeId || !parent?.data?.collapsed) {
-            const childEdges = currentEdges.filter((e) => e.source === parentId && e.source !== e.target);
-            for (const edge of childEdges) {
-              if (!descendantsToUpdate.has(edge.target)) {
-                descendantsToUpdate.add(edge.target);
-                queue.push(edge.target);
-              }
-            }
-          }
-        }
-      }
-
-      const updatedNodes = currentNodes.map((node) => {
-        if (node.id === targetNodeId) {
+        updatedNotebooks = workspace.notebooks.map((nb) => {
+          if (nb.id !== targetNb.id) return nb;
           return {
-            ...node,
-            data: {
-              ...node.data,
-              collapsed: nextCollapsed,
-            },
-          };
-        }
-
-        if (descendantsToUpdate.has(node.id)) {
-          return {
-            ...node,
-            data: {
-              ...node.data,
-              hidden: nextCollapsed,
-            },
-          };
-        }
-
-        return node;
-      });
-
-      // Recalculate layout for visible nodes so remaining nodes pack tightly together
-      const layoutedNodes = await recalculateLayout(updatedNodes, currentEdges, currentLayoutRef.current);
-      setNodes(layoutedNodes);
-
-      // Smoothly frame the updated compact layout
-      setTimeout(() => {
-        fitView({ duration: 350, padding: 0.2 });
-      }, 50);
-    },
-    [recalculateLayout, setNodes, fitView]
-  );
-
-  // Quick Hierarchical Folding (L1, L2, Expand All, Collapse All)
-  const handleFoldLevel = useCallback(
-    async (level: number | 'all-expand' | 'all-collapse') => {
-      const currentNodes = nodesRef.current;
-      const currentEdges = edgesRef.current;
-
-      let root = currentNodes.find((n) => n.data?.isRoot);
-      if (!root && currentNodes.length > 0) {
-        const targetIds = new Set(currentEdges.map((e) => e.target));
-        root = currentNodes.find((n) => !targetIds.has(n.id)) || currentNodes[0];
-      }
-
-      if (!root) return;
-
-      let updatedNodes: MapMindNode[];
-
-      if (level === 'all-expand') {
-        updatedNodes = currentNodes.map((n) => ({
-          ...n,
-          data: { ...n.data, collapsed: false, hidden: false },
-        }));
-      } else if (level === 'all-collapse') {
-        updatedNodes = currentNodes.map((n) => ({
-          ...n,
-          data: {
-            ...n.data,
-            collapsed: n.id === root!.id,
-            hidden: n.id !== root!.id,
-          },
-        }));
-      } else {
-        // Calculate node depth from root
-        const depthMap = new Map<string, number>();
-        const queue: { id: string; depth: number }[] = [{ id: root.id, depth: 0 }];
-        depthMap.set(root.id, 0);
-
-        while (queue.length > 0) {
-          const { id, depth } = queue.shift()!;
-          const children = currentEdges
-            .filter((e) => e.source === id && e.source !== e.target)
-            .map((e) => e.target);
-          for (const childId of children) {
-            if (!depthMap.has(childId)) {
-              depthMap.set(childId, depth + 1);
-              queue.push({ id: childId, depth: depth + 1 });
-            }
-          }
-        }
-
-        const targetLevel = typeof level === 'number' ? level : 1;
-
-        updatedNodes = currentNodes.map((n) => {
-          const d = depthMap.get(n.id) ?? 1;
-          const isHidden = d > targetLevel;
-          const isCollapsed = d === targetLevel;
-          return {
-            ...n,
-            data: {
-              ...n.data,
-              hidden: isHidden,
-              collapsed: isCollapsed,
-            },
+            ...nb,
+            sections: nb.sections.map((sec) =>
+              sec.id === newSecId ? { ...sec, pages: [newPage, ...sec.pages] } : sec
+            ),
           };
         });
       }
 
-      // Re-layout visible nodes so remaining nodes immediately come near each other
-      const layoutedNodes = await recalculateLayout(updatedNodes, currentEdges, currentLayoutRef.current);
-      setNodes(layoutedNodes);
-
-      showNotification(
-        level === 'all-expand'
-          ? 'Expanded all branches'
-          : level === 'all-collapse'
-          ? 'Collapsed to root topic'
-          : `Folded to Level ${level} (Compacted)`,
-        'info'
-      );
-
-      // Smoothly zoom and pan camera to fit the compacted mind map
-      setTimeout(() => {
-        fitView({ duration: 400, padding: 0.2 });
-      }, 50);
-    },
-    [recalculateLayout, setNodes, showNotification, fitView]
-  );
-
-  // Update node label directly
-  const handleUpdateNodeLabel = useCallback(
-    (nodeId: string, label: string) => {
-      setNodes((nds) => {
-        const updated = nds.map((n) =>
-          n.id === nodeId ? { ...n, data: { ...n.data, label, title: label } } : n
-        );
-        nodesRef.current = updated;
-        return updated;
+      persistWorkspace({
+        ...workspace,
+        notebooks: updatedNotebooks,
+        activeNotebookId: targetNb.id,
+        activeSectionId: newSecId,
+        activePageId: newPage.id,
       });
+
+      setViewMode('editor');
+      showNotification(`Created note "${title}"`, 'success');
     },
-    [setNodes]
+    [workspace, persistWorkspace, showNotification]
   );
 
-  // Update arbitrary node properties
-  const handleUpdateNode = useCallback(
-    (nodeId: string, updates: Partial<MapMindNode['data']>) => {
-      setNodes((nds) => {
-        const updated = nds.map((n) =>
-          n.id === nodeId ? { ...n, data: { ...n.data, ...updates } } : n
-        );
-        nodesRef.current = updated;
-        return updated;
+  const handleUpdatePageContent = useCallback(
+    (pageId: string, content: string) => {
+      if (!workspace) return;
+      const updatedNotebooks = workspace.notebooks.map((nb) => ({
+        ...nb,
+        sections: nb.sections.map((sec) => ({
+          ...sec,
+          pages: sec.pages.map((p) =>
+            p.id === pageId ? { ...p, content, updatedAt: new Date().toISOString() } : p
+          ),
+        })),
+      }));
+
+      persistWorkspace({ ...workspace, notebooks: updatedNotebooks });
+    },
+    [workspace, persistWorkspace]
+  );
+
+  const handleUpdatePageTitle = useCallback(
+    (pageId: string, title: string) => {
+      if (!workspace) return;
+      const updatedNotebooks = workspace.notebooks.map((nb) => ({
+        ...nb,
+        sections: nb.sections.map((sec) => ({
+          ...sec,
+          pages: sec.pages.map((p) =>
+            p.id === pageId ? { ...p, title, updatedAt: new Date().toISOString() } : p
+          ),
+        })),
+      }));
+
+      persistWorkspace({ ...workspace, notebooks: updatedNotebooks });
+    },
+    [workspace, persistWorkspace]
+  );
+
+  const handleToggleFavorite = useCallback(
+    (pageId: string) => {
+      if (!workspace) return;
+      const updatedNotebooks = workspace.notebooks.map((nb) => ({
+        ...nb,
+        sections: nb.sections.map((sec) => ({
+          ...sec,
+          pages: sec.pages.map((p) =>
+            p.id === pageId ? { ...p, favorite: !p.favorite } : p
+          ),
+        })),
+      }));
+
+      persistWorkspace({ ...workspace, notebooks: updatedNotebooks });
+    },
+    [workspace, persistWorkspace]
+  );
+
+  const handleDeletePage = useCallback(
+    (pageId: string) => {
+      if (!workspace) return;
+      const updatedNotebooks = workspace.notebooks.map((nb) => ({
+        ...nb,
+        sections: nb.sections.map((sec) => ({
+          ...sec,
+          pages: sec.pages.filter((p) => p.id !== pageId),
+        })),
+      }));
+
+      const nextActivePage = allPages.find((p) => p.id !== pageId)?.id || null;
+      persistWorkspace({
+        ...workspace,
+        notebooks: updatedNotebooks,
+        activePageId: nextActivePage,
       });
+      showNotification('Note deleted', 'info');
     },
-    [setNodes]
+    [workspace, allPages, persistWorkspace, showNotification]
   );
 
-  // Delete node and auto-select its immediate direct parent
-  const handleDeleteNode = useCallback(
-    (nodeId: string) => {
-      const currentNodes = nodesRef.current;
-      const currentEdges = edgesRef.current;
+  const handleDeleteNotebook = useCallback(
+    (notebookId: string) => {
+      if (!workspace) return;
+      const updated = workspace.notebooks.filter((nb) => nb.id !== notebookId);
+      persistWorkspace({
+        ...workspace,
+        notebooks: updated,
+        activeNotebookId: updated[0]?.id || null,
+        activeSectionId: updated[0]?.sections[0]?.id || null,
+        activePageId: updated[0]?.sections[0]?.pages[0]?.id || null,
+      });
+      showNotification('Notebook deleted', 'info');
+    },
+    [workspace, persistWorkspace, showNotification]
+  );
 
-      // Find immediate parent (incoming edge where this node is target, excluding self loops)
-      const incomingEdge = currentEdges.find((e) => e.target === nodeId && e.source !== nodeId);
-      const outgoingEdge = currentEdges.find((e) => e.source === nodeId && e.target !== nodeId);
-      const immediateParentId = incomingEdge
-        ? incomingEdge.source
-        : outgoingEdge
-        ? outgoingEdge.target
-        : null;
+  const handleDeleteSection = useCallback(
+    (sectionId: string) => {
+      if (!workspace) return;
+      const updated = workspace.notebooks.map((nb) => ({
+        ...nb,
+        sections: nb.sections.filter((s) => s.id !== sectionId),
+      }));
+      persistWorkspace({ ...workspace, notebooks: updated });
+      showNotification('Section deleted', 'info');
+    },
+    [workspace, persistWorkspace, showNotification]
+  );
 
-      // Find all descendant nodes to clean up recursively
-      const toDelete = new Set<string>([nodeId]);
-      const queue = [nodeId];
-      while (queue.length > 0) {
-        const curr = queue.shift()!;
-        const children = currentEdges
-          .filter((e) => e.source === curr && e.source !== e.target)
-          .map((e) => e.target);
-        for (const childId of children) {
-          if (!toDelete.has(childId)) {
-            toDelete.add(childId);
-            queue.push(childId);
-          }
-        }
-      }
-
-      // Next selected target: strictly the immediate parent above this node
-      let nextSelectedId: string | null = immediateParentId;
-      if (!nextSelectedId) {
-        const remaining = currentNodes.filter((n) => !toDelete.has(n.id));
-        if (remaining.length > 0) {
-          nextSelectedId = remaining[0].id;
-        }
-      }
-
-      setNodes((nds) =>
-        nds
-          .filter((n) => !toDelete.has(n.id))
-          .map((n) => ({
-            ...n,
-            selected: n.id === nextSelectedId,
-            data: { ...n.data, isEditing: false },
-          }))
+  // Navigate to page by title (from WikiLinks, Backlinks, etc.), auto-creating note if it does not exist
+  const handleNavigateToPage = useCallback(
+    (pageTitle: string) => {
+      const trimmed = pageTitle.trim();
+      const found = allPages.find(
+        (p) => p.title.toLowerCase().trim() === trimmed.toLowerCase()
       );
-      setEdges((eds) =>
-        eds.filter((e) => !toDelete.has(e.source) && !toDelete.has(e.target))
-      );
-      setSelectedNodeId(nextSelectedId);
-
-      if (nextSelectedId) {
-        setTimeout(() => centerOnNode(nextSelectedId, 250), 30);
-      }
-
-      showNotification('Deleted node & selected parent', 'info');
-    },
-    [setNodes, setEdges, centerOnNode, showNotification]
-  );
-
-  // Add Child Node (Tab) with immediate edit mode and compact multi-child positioning
-  const handleAddChildNode = useCallback(
-    (parentId: string, parentLabelToCommit?: string) => {
-      const currentNodes = nodesRef.current;
-      const currentEdges = edgesRef.current;
-      const parentNode = currentNodes.find((n) => n.id === parentId);
-      if (!parentNode) return;
-
-      const newId = `node_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-
-      // Existing children for compact positioning
-      const existingChildEdges = currentEdges.filter((e) => e.source === parentId && e.source !== e.target);
-      const existingChildNodes = existingChildEdges
-        .map((e) => currentNodes.find((n) => n.id === e.target))
-        .filter(Boolean) as MapMindNode[];
-
-      const numChildren = existingChildNodes.length;
-      const isLeft = parentNode.position.x < -50;
-
-      // Multi-column compact wrap for child placements
-      const col = Math.floor(numChildren / 4);
-      const row = numChildren % 4;
-      const colSpacing = 240;
-      const rowSpacing = 85;
-
-      const xOffset = isLeft ? -(260 + col * colSpacing) : (260 + col * colSpacing);
-      const targetY = parentNode.position.y - 40 + row * rowSpacing;
-
-      const rawNewNode: MapMindNode = {
-        id: newId,
-        type: 'custom',
-        selected: true,
-        position: {
-          x: parentNode.position.x + xOffset,
-          y: targetY,
-        },
-        data: {
-          label: 'New Child',
-          title: 'New Child',
-          colorTheme: parentNode.data?.colorTheme || 'blue',
-          tags: ['Idea'],
-          isEditing: true, // Immediately start typing!
-        },
-      };
-
-      const newEdge: MapMindEdge = {
-        id: `e_${parentId}_${newId}`,
-        source: parentId,
-        target: newId,
-        type: 'custom',
-        data: {
-          routingStyle: settings.edgeRoutingStyle || 'curved',
-        },
-      };
-
-      // Unselect all other nodes, ensure parent is uncollapsed, commit parent's typed label if provided, and append new node
-      const updatedNodes = [
-        ...currentNodes.map((n) => {
-          const isTargetParent = n.id === parentId;
-          const updatedLabel =
-            isTargetParent && parentLabelToCommit !== undefined ? parentLabelToCommit : n.data?.label;
-          return {
-            ...n,
-            selected: false,
-            data: {
-              ...n.data,
-              label: updatedLabel,
-              title: updatedLabel,
-              isEditing: false,
-              collapsed: isTargetParent ? false : n.data?.collapsed,
-            },
-          };
-        }),
-        rawNewNode,
-      ];
-
-      // Automatically run collision avoidance so the new node never overlaps any existing branch
-      const resolvedNodes = settings.collisionAvoidance
-        ? resolveNodeDragCollision(newId, updatedNodes)
-        : updatedNodes;
-
-      nodesRef.current = resolvedNodes;
-      setNodes(resolvedNodes);
-
-      const nextEdges = [...currentEdges, newEdge];
-      edgesRef.current = nextEdges;
-      setEdges(nextEdges);
-
-      selectedNodeIdRef.current = newId;
-      setSelectedNodeId(newId);
-      selectedEdgeIdRef.current = null;
-      setSelectedEdgeId(null);
-
-      setTimeout(() => centerOnNode(newId, 300), 50);
-    },
-    [setNodes, setEdges, centerOnNode, settings.edgeRoutingStyle, settings.collisionAvoidance]
-  );
-
-  // Add Sibling Node (Enter) with immediate edit mode
-  const handleAddSiblingNode = useCallback(
-    (nodeId: string, currentLabelToCommit?: string) => {
-      const currentNodes = nodesRef.current;
-      const currentEdges = edgesRef.current;
-      const currentNode = currentNodes.find((n) => n.id === nodeId);
-      if (!currentNode) return;
-
-      const incomingEdge = currentEdges.find((e) => e.target === nodeId && e.source !== nodeId);
-
-      if (!incomingEdge || currentNode.data?.isRoot) {
-        // If root node, adding sibling means adding a new main branch
-        handleAddChildNode(nodeId, currentLabelToCommit);
-        return;
-      }
-
-      const parentId = incomingEdge.source;
-      const parentNode = currentNodes.find((n) => n.id === parentId);
-      const newId = `node_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-
-      // Find all siblings
-      const siblingEdges = currentEdges.filter((e) => e.source === parentId && e.source !== e.target);
-      const siblingNodes = siblingEdges
-        .map((e) => currentNodes.find((n) => n.id === e.target))
-        .filter(Boolean) as MapMindNode[];
-
-      const maxY = Math.max(currentNode.position.y, ...siblingNodes.map((s) => s.position.y));
-      const targetY = maxY + 85;
-
-      const rawNewNode: MapMindNode = {
-        id: newId,
-        type: 'custom',
-        selected: true,
-        position: {
-          x: currentNode.position.x,
-          y: targetY,
-        },
-        data: {
-          label: 'New Idea',
-          title: 'New Idea',
-          colorTheme: parentNode?.data?.colorTheme || currentNode.data?.colorTheme || 'blue',
-          tags: ['Idea'],
-          isEditing: true, // Immediately start typing!
-        },
-      };
-
-      const newEdge: MapMindEdge = {
-        id: `e_${parentId}_${newId}`,
-        source: parentId,
-        target: newId,
-        type: 'custom',
-        data: {
-          routingStyle: settings.edgeRoutingStyle || 'curved',
-        },
-      };
-
-      const updatedNodes = [
-        ...currentNodes.map((n) => {
-          const isTargetNode = n.id === nodeId;
-          const updatedLabel =
-            isTargetNode && currentLabelToCommit !== undefined ? currentLabelToCommit : n.data?.label;
-          return {
-            ...n,
-            selected: false,
-            data: {
-              ...n.data,
-              label: updatedLabel,
-              title: updatedLabel,
-              isEditing: false,
-            },
-          };
-        }),
-        rawNewNode,
-      ];
-
-      const resolvedNodes = settings.collisionAvoidance
-        ? resolveNodeDragCollision(newId, updatedNodes)
-        : updatedNodes;
-
-      nodesRef.current = resolvedNodes;
-      setNodes(resolvedNodes);
-
-      const nextEdges = [...currentEdges, newEdge];
-      edgesRef.current = nextEdges;
-      setEdges(nextEdges);
-
-      selectedNodeIdRef.current = newId;
-      setSelectedNodeId(newId);
-      selectedEdgeIdRef.current = null;
-      setSelectedEdgeId(null);
-
-      setTimeout(() => centerOnNode(newId, 300), 50);
-    },
-    [handleAddChildNode, setNodes, setEdges, centerOnNode, settings.edgeRoutingStyle, settings.collisionAvoidance]
-  );
-
-  // Atomically commit node title and transition edit mode / add child or sibling
-  const handleCommitNodeLabel = useCallback(
-    (nodeId: string, label: string, action: 'none' | 'add-child' | 'add-sibling' = 'none') => {
-      const trimmed = label.trim() || 'Untitled Node';
-      if (action === 'add-child') {
-        handleAddChildNode(nodeId, trimmed);
-      } else if (action === 'add-sibling') {
-        handleAddSiblingNode(nodeId, trimmed);
+      if (found) {
+        handleSelectPage(found.notebookId, found.sectionId, found.id);
+        setViewMode('editor');
       } else {
-        selectedNodeIdRef.current = nodeId;
-        setSelectedNodeId(nodeId);
-        setNodes((nds) => {
-          const updated = nds.map((n) =>
-            n.id === nodeId
-              ? {
-                  ...n,
-                  selected: true,
-                  data: {
-                    ...n.data,
-                    label: trimmed,
-                    title: trimmed,
-                    isEditing: false,
-                  },
-                }
-              : n
-          );
-          nodesRef.current = updated;
-          return updated;
-        });
+        // Auto-create new note in the active or first notebook & section
+        const targetNbId = workspace?.activeNotebookId || workspace?.notebooks[0]?.id;
+        const targetSecId = workspace?.activeSectionId || workspace?.notebooks[0]?.sections[0]?.id;
+
+        handleCreatePage(targetNbId, targetSecId, trimmed);
+        setViewMode('editor');
+        showNotification(`Created new note [[${trimmed}]]`, 'success');
       }
     },
-    [handleAddChildNode, handleAddSiblingNode, setNodes]
+    [allPages, workspace, handleSelectPage, handleCreatePage, showNotification]
   );
 
-  // Add root / free node
-  const handleAddNode = useCallback(() => {
-    const currentNodes = nodesRef.current;
-    const newId = `node_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  // Bi-Directional Mind Map Bridge: Note -> Mind Map
+  const handleOpenMindMapForPage = useCallback(
+    (page: Page) => {
+      const { nodes: parsedNodes, edges: parsedEdges } = markdownToMindMap(page.title, page.content, page.id);
+      setNodes(parsedNodes);
+      setEdges(parsedEdges);
+      setSelectedNodeId(parsedNodes[0]?.id || null);
+      setViewMode('mindmap');
+      showNotification(`Generated interactive mind map for "${page.title}"`, 'success');
+      setTimeout(() => fitView({ duration: 600 }), 150);
+    },
+    [setNodes, setEdges, fitView, showNotification]
+  );
 
-    let x = 0;
-    let y = 0;
-    if (currentNodes.length > 0) {
-      const maxY = Math.max(...currentNodes.map((n) => n.position.y));
-      const avgX = currentNodes.reduce((acc, n) => acc + n.position.x, 0) / currentNodes.length;
-      x = Math.round(avgX);
-      y = Math.round(maxY + 140);
+  // Bi-Directional Mind Map Bridge: Mind Map -> Note Export
+  const handleExportMindMapToNote = useCallback(() => {
+    if (!workspace || nodes.length === 0) return;
+    const markdown = mindMapToMarkdown(nodes, edges);
+    const rootLabel = nodes.find((n) => n.data?.isRoot)?.data?.label || 'MindMap Note';
+
+    handleCreatePage(undefined, undefined, rootLabel);
+    setTimeout(() => {
+      if (activePage) {
+        handleUpdatePageContent(activePage.id, markdown);
+      }
+    }, 100);
+    setViewMode('editor');
+    showNotification('Exported Mind Map to new Markdown Note!', 'success');
+  }, [workspace, nodes, edges, handleCreatePage, activePage, handleUpdatePageContent, showNotification]);
+
+  // Open or Create Today's Daily Note (Daily/YYYY-MM-DD.md)
+  const handleOpenDailyNote = useCallback(() => {
+    if (!workspace) return;
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const title = `Daily Note - ${todayStr}`;
+    const found = allPages.find((p) => p.title === title || (p.pageType === 'daily' && p.title.includes(todayStr)));
+
+    if (found) {
+      handleSelectPage(found.notebookId, found.sectionId, found.id);
+      setViewMode('editor');
+      showNotification(`Opened Today's Daily Note (${todayStr})`, 'info');
+      return;
     }
 
-    const rawNewNode: MapMindNode = {
-      id: newId,
-      type: 'custom',
-      selected: true,
-      position: { x, y },
-      data: {
-        label: 'Topic Branch',
-        title: 'Topic Branch',
-        colorTheme: 'blue',
-        tags: ['Draft'],
-        isEditing: true,
-      },
+    // Find or create a "Daily Notes" section in the active notebook
+    const targetNb = workspace.notebooks.find((n) => n.id === workspace.activeNotebookId) || workspace.notebooks[0];
+    if (!targetNb) return;
+
+    let targetSec = targetNb.sections.find((s) => s.name.toLowerCase().includes('daily'));
+    const targetSecId = targetSec ? targetSec.id : targetNb.sections[0]?.id || `sec-${Date.now()}`;
+
+    const newPageId = `page-daily-${Date.now()}`;
+    const initialContent = `# 📅 ${title}
+
+## 🎯 Today's Focus & Action Items
+- [ ] 
+
+## 📝 Quick Thoughts & Log
+
+## 🔗 Connected Notes
+`;
+
+    const newDailyPage: Page = {
+      id: newPageId,
+      notebookId: targetNb.id,
+      sectionId: targetSecId,
+      title,
+      pageType: 'daily',
+      tags: ['daily'],
+      properties: { type: 'daily', status: 'in_progress', tags: ['daily'] },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      content: initialContent,
     };
 
-    const updatedNodes = [
-      ...currentNodes.map((n) => ({ ...n, selected: false, data: { ...n.data, isEditing: false } })),
-      rawNewNode,
-    ];
-
-    const resolvedNodes = settings.collisionAvoidance
-      ? resolveNodeDragCollision(newId, updatedNodes)
-      : updatedNodes;
-
-    setNodes(resolvedNodes);
-    setSelectedNodeId(newId);
-    setSelectedEdgeId(null);
-    setTimeout(() => centerOnNode(newId, 300), 50);
-    showNotification('Created new node', 'success');
-  }, [setNodes, centerOnNode, showNotification, settings.collisionAvoidance]);
-
-  // Spatial Keyboard Navigation (Arrows)
-  const handleNavigate = useCallback(
-    (direction: 'up' | 'down' | 'left' | 'right') => {
-      const currentNodes = nodesRef.current;
-      const currentEdges = edgesRef.current;
-      const currentId = selectedNodeIdRef.current;
-
-      const visibleNodes = currentNodes.filter((n) => !n.data?.hidden);
-      if (visibleNodes.length === 0) return;
-
-      if (!currentId) {
-        // Select root or first node
-        const first = visibleNodes.find((n) => n.data?.isRoot) || visibleNodes[0];
-        setSelectedNodeId(first.id);
-        return;
+    const updatedNotebooks = workspace.notebooks.map((nb) => {
+      if (nb.id !== targetNb.id) return nb;
+      const secExists = nb.sections.some((s) => s.id === targetSecId);
+      if (secExists) {
+        return {
+          ...nb,
+          sections: nb.sections.map((sec) =>
+            sec.id === targetSecId ? { ...sec, pages: [newDailyPage, ...sec.pages] } : sec
+          ),
+        };
+      } else {
+        return {
+          ...nb,
+          sections: [
+            {
+              id: targetSecId,
+              notebookId: targetNb.id,
+              name: '📅 Daily Notes',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              pages: [newDailyPage],
+            },
+            ...nb.sections,
+          ],
+        };
       }
+    });
 
-      const current = visibleNodes.find((n) => n.id === currentId);
-      if (!current) {
-        setSelectedNodeId(visibleNodes[0].id);
-        return;
-      }
+    persistWorkspace({
+      ...workspace,
+      notebooks: updatedNotebooks,
+      activeNotebookId: targetNb.id,
+      activeSectionId: targetSecId,
+      activePageId: newDailyPage.id,
+    });
 
-      const incoming = currentEdges.find((e) => e.target === current.id);
-      const parentId = incoming ? incoming.source : null;
-      const children = currentEdges
-        .filter((e) => e.source === current.id)
-        .map((e) => visibleNodes.find((n) => n.id === e.target))
-        .filter(Boolean) as MapMindNode[];
+    setViewMode('editor');
+    showNotification(`Created Today's Daily Note (${todayStr})`, 'success');
+  }, [workspace, allPages, handleSelectPage, persistWorkspace, showNotification]);
 
-      let nextTarget: MapMindNode | null = null;
-
-      if (direction === 'up' || direction === 'down') {
-        if (parentId) {
-          // Sibling navigation
-          const siblings = currentEdges
-            .filter((e) => e.source === parentId)
-            .map((e) => visibleNodes.find((n) => n.id === e.target))
-            .filter(Boolean) as MapMindNode[];
-
-          const idx = siblings.findIndex((s) => s.id === current.id);
-          if (direction === 'up' && idx > 0) {
-            nextTarget = siblings[idx - 1];
-          } else if (direction === 'down' && idx >= 0 && idx < siblings.length - 1) {
-            nextTarget = siblings[idx + 1];
-          }
-        }
-
-        // Geometric fallback
-        if (!nextTarget) {
-          const candidates = visibleNodes
-            .filter((n) => n.id !== current.id)
-            .filter((n) => (direction === 'up' ? n.position.y < current.position.y : n.position.y > current.position.y))
-            .sort((a, b) => {
-              const distA = Math.hypot(a.position.x - current.position.x, a.position.y - current.position.y);
-              const distB = Math.hypot(b.position.x - current.position.x, b.position.y - current.position.y);
-              return distA - distB;
-            });
-          if (candidates.length > 0) {
-            nextTarget = candidates[0];
-          }
-        }
-      } else if (direction === 'right') {
-        if (current.position.x < -50 && parentId) {
-          // On left side of map: moving right means moving to parent
-          nextTarget = visibleNodes.find((n) => n.id === parentId) || null;
-        } else if (children.length > 0) {
-          // Moving right to first child
-          nextTarget = children[0];
-        } else {
-          // Geometric right candidate
-          const candidates = visibleNodes
-            .filter((n) => n.position.x > current.position.x + 30)
-            .sort((a, b) => Math.hypot(a.position.x - current.position.x, a.position.y - current.position.y) -
-                             Math.hypot(b.position.x - current.position.x, b.position.y - current.position.y));
-          if (candidates.length > 0) nextTarget = candidates[0];
-        }
-      } else if (direction === 'left') {
-        if (current.position.x >= -50 && parentId) {
-          // On right side of map: moving left means moving to parent
-          nextTarget = visibleNodes.find((n) => n.id === parentId) || null;
-        } else if (children.length > 0) {
-          // Moving left to first child
-          nextTarget = children[0];
-        } else {
-          // Geometric left candidate
-          const candidates = visibleNodes
-            .filter((n) => n.position.x < current.position.x - 30)
-            .sort((a, b) => Math.hypot(a.position.x - current.position.x, a.position.y - current.position.y) -
-                             Math.hypot(b.position.x - current.position.x, b.position.y - current.position.y));
-          if (candidates.length > 0) nextTarget = candidates[0];
-        }
-      }
-
-      if (nextTarget) {
-        setSelectedNodeId(nextTarget.id);
-        // Ensure not in edit mode during navigation
-        setNodes((nds) =>
-          nds.map((n) => ({
-            ...n,
-            selected: n.id === nextTarget!.id,
-            data: { ...n.data, isEditing: false },
-          }))
-        );
-        centerOnNode(nextTarget.id, 250);
-      }
+  // Accept AI Connection Suggestion
+  const handleAcceptAiSuggestion = useCallback(
+    (suggestion: AiConnectionSuggestion) => {
+      if (!activePage) return;
+      const linkText = `\n\n## Related Connections\n- [[${suggestion.targetTitle}]]: ${suggestion.reason}\n`;
+      handleUpdatePageContent(activePage.id, activePage.content + linkText);
+      showNotification(`Connected [[${suggestion.targetTitle}]]!`, 'success');
     },
-    [setNodes, centerOnNode]
+    [activePage, handleUpdatePageContent, showNotification]
   );
 
-  // Global Keyboard Shortcuts Listener
-  useEffect(() => {
-    const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      // Check if user is typing in an input or textarea
-      const target = e.target as HTMLElement;
-      const isInput =
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable;
+  // Convert Unlinked Mention to WikiLink
+  const handleConvertMentionToLink = useCallback(
+    (mention: UnlinkedMentionItem) => {
+      const targetPage = allPages.find((p) => p.id === mention.sourcePageId);
+      if (!targetPage || !activePage) return;
 
-      // If user is inside an input, only handle Escape or let input's own onKeyDown handle Tab/Enter
-      if (isInput) {
-        return;
-      }
+      const newContent = convertMentionToWikiLink(targetPage.content, activePage.title);
+      handleUpdatePageContent(targetPage.id, newContent);
+      showNotification(`Linked "${activePage.title}" inside [[${targetPage.title}]]`, 'success');
+    },
+    [allPages, activePage, handleUpdatePageContent, showNotification]
+  );
 
-      const activeId = selectedNodeIdRef.current;
-
-      // 0a. Ctrl+S or Ctrl+Shift+S -> Save / Save As
-      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S' || e.code === 'KeyS')) {
-        e.preventDefault();
-        if (e.shiftKey) {
-          handleSave(true);
+  // MapMind Layout Handlers
+  const handleApplyLayout = useCallback(
+    async (dir: LayoutDirection, density?: LayoutDensity) => {
+      try {
+        if (dir === 'BALANCED_MINDMAP') {
+          const res = await getElkLayout(nodes, edges, { density: density || settings.layoutDensity });
+          setNodes(res.nodes);
+          setEdges(res.edges);
         } else {
-          handleSave(false);
+          const res = await getDagreLayout(nodes, edges, {
+            direction: dir as 'TB' | 'LR' | 'BT' | 'RL',
+            density: density || settings.layoutDensity,
+          });
+          setNodes(res.nodes);
+          setEdges(res.edges);
         }
-        return;
+        setCurrentLayout(dir);
+        setTimeout(() => fitView({ duration: 500 }), 50);
+      } catch (err) {
+        console.error('Layout error:', err);
+      }
+    },
+    [nodes, edges, settings.layoutDensity, setNodes, setEdges, fitView]
+  );
+
+  // Node editing handlers in MapMind canvas
+  const handleUpdateNode = useCallback(
+    (nodeId: string, updates: Partial<MapMindNode['data']>) => {
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.id === nodeId
+            ? { ...n, data: { ...n.data, ...updates } }
+            : n
+        )
+      );
+    },
+    [setNodes]
+  );
+
+  const handleDeleteNode = useCallback(
+    (nodeId: string) => {
+      setNodes((nds) => nds.filter((n) => n.id !== nodeId));
+      setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId));
+      setSelectedNodeId(null);
+    },
+    [setNodes, setEdges]
+  );
+
+  // Dedicated Add Child Node action (Tab / Floating Dock)
+  const handleAddChildToNode = useCallback(
+    (parentId?: string | null) => {
+      const targetParent = (parentId ? nodes.find((n) => n.id === parentId) : null) || nodes[0];
+      if (!targetParent) return;
+
+      const newId = `node-${Date.now()}`;
+      const childCount = edges.filter((e) => e.source === targetParent.id).length;
+      const newNode: MapMindNode = {
+        id: newId,
+        type: 'custom',
+        position: {
+          x: targetParent.position.x + 280,
+          y: targetParent.position.y + (childCount - 1) * 75,
+        },
+        selected: true,
+        data: {
+          label: 'New Idea',
+          colorTheme: (targetParent.data?.colorTheme || 'purple') as NodeColorTheme,
+          shape: 'pill',
+          isEditing: true,
+        },
+      };
+      const newEdge: MapMindEdge = {
+        id: `edge-${targetParent.id}-${newId}`,
+        source: targetParent.id,
+        target: newId,
+        type: 'custom',
+      };
+      setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), newNode]);
+      setEdges((eds) => [...eds, newEdge]);
+      setSelectedNodeId(newId);
+      showNotification('Added child node! Type to edit.', 'success');
+    },
+    [nodes, edges, setNodes, setEdges, showNotification]
+  );
+
+  // Dedicated Add Sibling Node action (Enter / Floating Dock)
+  const handleAddSiblingToNode = useCallback(
+    (siblingId?: string | null) => {
+      const targetSibling = (siblingId ? nodes.find((n) => n.id === siblingId) : null) || nodes[0];
+      if (!targetSibling) return;
+
+      const incoming = edges.find((e) => e.target === targetSibling.id);
+      const parentId = incoming ? incoming.source : targetSibling.data?.isRoot ? null : nodes[0]?.id;
+
+      const newId = `node-${Date.now()}`;
+      const newNode: MapMindNode = {
+        id: newId,
+        type: 'custom',
+        position: {
+          x: targetSibling.position.x,
+          y: targetSibling.position.y + 90,
+        },
+        selected: true,
+        data: {
+          label: 'New Branch',
+          colorTheme: (targetSibling.data?.colorTheme || 'purple') as NodeColorTheme,
+          shape: 'pill',
+          isEditing: true,
+        },
+      };
+
+      setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), newNode]);
+
+      if (parentId) {
+        const newEdge: MapMindEdge = {
+          id: `edge-${parentId}-${newId}`,
+          source: parentId,
+          target: newId,
+          type: 'custom',
+        };
+        setEdges((eds) => [...eds, newEdge]);
       }
 
-      // 0b. Ctrl+O -> Open file
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'o' || e.key === 'O' || e.code === 'KeyO')) {
-        e.preventDefault();
-        handleOpen();
-        return;
-      }
+      setSelectedNodeId(newId);
+      showNotification('Added sibling branch! Type to edit.', 'success');
+    },
+    [nodes, edges, setNodes, setEdges, showNotification]
+  );
 
-      // 0c. Ctrl+K or Cmd+K -> Open Search Command Palette
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
-        e.preventDefault();
-        setIsSearchOpen((prev) => !prev);
-        return;
-      }
+  // Canvas Keyboard Shortcuts (Tab, Enter, Space/F2, Delete in Mind Map mode)
+  useEffect(() => {
+    if (viewMode !== 'mindmap') return;
 
-      // 1. Tab -> Add Child Node
+    const handleCanvasKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isTyping =
+        activeEl instanceof HTMLInputElement ||
+        activeEl instanceof HTMLTextAreaElement ||
+        activeEl?.getAttribute('contenteditable') === 'true';
+
+      if (isTyping) return;
+
+      // 1. Tab -> Add Child to Selected Node
       if (e.key === 'Tab') {
         e.preventDefault();
-        if (activeId) {
-          handleAddChildNode(activeId);
-        } else if (nodesRef.current.length > 0) {
-          handleAddChildNode(nodesRef.current[0].id);
-        }
+        const targetId = selectedNodeId || nodes[0]?.id;
+        if (targetId) handleAddChildToNode(targetId);
         return;
       }
 
-      // 2. Enter -> Add Sibling Node
+      // 2. Enter -> Add Sibling to Selected Node
       if (e.key === 'Enter') {
         e.preventDefault();
-        if (activeId) {
-          handleAddSiblingNode(activeId);
-        }
+        const targetId = selectedNodeId || nodes[0]?.id;
+        if (targetId) handleAddSiblingToNode(targetId);
         return;
       }
 
-      const isSpaceKey =
-        e.key === ' ' ||
-        e.key === 'Spacebar' ||
-        e.key === 'Space' ||
-        e.code === 'Space' ||
-        e.keyCode === 32;
-
-      const isF2Key =
-        e.key === 'F2' ||
-        e.code === 'F2' ||
-        e.keyCode === 113;
-
-      // 3. Space or F2 -> Start Editing Selected Node or Selected Edge
-      if (isSpaceKey || isF2Key) {
-        const activeNodeId =
-          activeId ||
-          selectedNodeId ||
-          nodesRef.current.find((n) => n.selected)?.id ||
-          (nodesRef.current.length > 0 ? nodesRef.current[nodesRef.current.length - 1].id : null);
-
-        if (activeNodeId) {
-          e.preventDefault();
-          e.stopPropagation();
-          handleStartEditingNode(activeNodeId);
-          return;
-        } else if (selectedEdgeIdRef.current) {
-          e.preventDefault();
-          e.stopPropagation();
-          handleStartEditingEdge(selectedEdgeIdRef.current);
-          return;
-        }
-      }
-
-      // 3b. 'e' or 'l' -> Edit Edge Label / Connection Comment directly via keyboard
-      if ((e.key === 'e' || e.key === 'E' || e.key === 'l' || e.key === 'L') && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (activeId) {
-          const currentEdges = edgesRef.current;
-          const targetEdge =
-            currentEdges.find((ed) => ed.target === activeId) ||
-            currentEdges.find((ed) => ed.source === activeId);
-          if (targetEdge) {
-            e.preventDefault();
-            handleStartEditingEdge(targetEdge.id);
-            return;
-          }
-        } else if (selectedEdgeIdRef.current) {
-          e.preventDefault();
-          handleStartEditingEdge(selectedEdgeIdRef.current);
-          return;
-        }
-      }
-
-      // 3c. 't' or 'T' or '#' -> Quick Add / Manage Tags on Selected Node
-      if (
-        (e.key === 't' || e.key === 'T' || e.key === '#' || (e.altKey && (e.key === 't' || e.key === 'T'))) &&
-        !e.ctrlKey &&
-        !e.metaKey
-      ) {
-        const activeNodeId =
-          activeId ||
-          selectedNodeId ||
-          nodesRef.current.find((n) => n.selected)?.id ||
-          (nodesRef.current.length > 0 ? nodesRef.current[nodesRef.current.length - 1].id : null);
-
-        if (activeNodeId) {
-          e.preventDefault();
-          e.stopPropagation();
-          setSelectedNodeId(activeNodeId);
-          selectedNodeIdRef.current = activeNodeId;
-          setIsQuickTagOpen(true);
-          return;
-        }
-      }
-
-      // 4. 'f' -> Center & Toggle Subtree Spotlight Focus; 'Shift+F' -> Fit View
-      if (e.key === 'f' || e.key === 'F') {
+      // 3. Space or F2 -> Start Editing Selected Node
+      if (e.key === ' ' || e.key === 'F2') {
         e.preventDefault();
-        if (e.shiftKey) {
-          fitView({ duration: 400 });
-        } else if (activeId) {
-          centerOnNode(activeId, 400);
-          setIsSpotlightActive((prev) => !prev);
-        }
+        const targetId = selectedNodeId || nodes[0]?.id;
+        if (targetId) handleUpdateNode(targetId, { isEditing: true });
         return;
       }
 
-      // 5. Arrow Keys -> Spatial Navigation
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        handleNavigate('up');
-        return;
-      }
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        handleNavigate('down');
-        return;
-      }
-      if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        handleNavigate('right');
-        return;
-      }
-      if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        handleNavigate('left');
-        return;
-      }
-
-      // 6. Delete or Backspace -> Delete Selected Node or Edge
+      // 4. Delete or Backspace -> Delete Selected Node
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (activeId) {
+        if (selectedNodeId && nodes.find((n) => n.id === selectedNodeId && !n.data?.isRoot)) {
           e.preventDefault();
-          handleDeleteNode(activeId);
-          return;
-        } else if (selectedEdgeIdRef.current) {
-          e.preventDefault();
-          handleDeleteEdge(selectedEdgeIdRef.current);
-          return;
-        }
-      }
-
-      // 7. 'c' or '/' or '.' -> Toggle Collapse Subtree
-      if (e.key === 'c' || e.key === '/' || e.key === '.') {
-        if (activeId) {
-          e.preventDefault();
-          handleToggleCollapse(activeId);
+          handleDeleteNode(selectedNodeId);
+          showNotification('Deleted node', 'info');
         }
         return;
       }
+    };
 
-      // 8. Alt+E or (Ctrl+Shift+E) -> Expand Selected Node with AI
-      if (
-        (e.altKey && (e.key === 'e' || e.key === 'E')) ||
-        ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'e' || e.key === 'E'))
-      ) {
-        if (activeId) {
-          e.preventDefault();
-          handleOpenNodeExpansion(activeId);
-        }
-        return;
-      }
+    window.addEventListener('keydown', handleCanvasKeyDown);
+    return () => window.removeEventListener('keydown', handleCanvasKeyDown);
+  }, [
+    viewMode,
+    selectedNodeId,
+    nodes,
+    handleAddChildToNode,
+    handleAddSiblingToNode,
+    handleUpdateNode,
+    handleDeleteNode,
+    showNotification,
+  ]);
 
-      // 8. Direct Typing -> If user starts typing any alphanumeric letter while a node is selected, start editing immediately!
-      if (
-        e.key.length === 1 &&
-        !isSpaceKey &&
-        !e.ctrlKey &&
-        !e.metaKey &&
-        !e.altKey &&
-        e.key !== '?' &&
-        e.key !== 'e' &&
-        e.key !== 'E' &&
-        e.key !== 'l' &&
-        e.key !== 'L' &&
-        e.key !== 't' &&
-        e.key !== 'T' &&
-        e.key !== '#' &&
-        e.key !== 'c' &&
-        e.key !== 'C' &&
-        e.key !== 'f' &&
-        e.key !== 'F' &&
-        e.key !== 'p' &&
-        e.key !== 'P' &&
-        e.key !== 'o' &&
-        e.key !== 'O'
-      ) {
-        if (activeId) {
-          handleStartEditingNode(activeId);
-        }
-      }
-
-      // 8. F5 or 'p' / 'P' -> Start Presentation Tour
-      if (e.key === 'F5' || e.key === 'p' || e.key === 'P') {
+  // Universal Keyboard Shortcuts (Ctrl+K, Ctrl+P, Ctrl+1..6, Ctrl+S, Ctrl+O, Ctrl+Alt+N, Ctrl+Alt+V)
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+K or Cmd+K -> Universal Command Palette
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        setIsPresentationOpen((prev) => !prev);
+        setIsCommandPaletteOpen((prev) => !prev);
         return;
       }
 
-      // 9. 'o' / 'O' -> Toggle Outline Navigator
-      if (e.key === 'o' || e.key === 'O') {
+      // Ctrl+P -> Quick Open
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
         e.preventDefault();
-        setIsOutlineOpen((prev) => !prev);
+        setIsCommandPaletteOpen(true);
         return;
       }
 
-      // 10. '?' -> Open Keyboard Shortcuts Guide
-      if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+      // Ctrl+Alt+N -> Create New Vault
+      if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === 'n') {
         e.preventDefault();
-        setIsShortcutsOpen((prev) => !prev);
+        setIsVaultManagerOpen(true);
         return;
+      }
+
+      // Ctrl+Alt+V -> Open Vault Switcher
+      if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        setIsVaultManagerOpen((prev) => !prev);
+        return;
+      }
+
+      // Ctrl+S -> Save / Export Vault JSON (Override browser save page)
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleExportCurrentVault();
+        return;
+      }
+
+      // Ctrl+O -> Open / Import Vault JSON
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        setIsVaultManagerOpen(true);
+        return;
+      }
+
+      // Ctrl+D -> Open Today's Daily Note
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        handleOpenDailyNote();
+        return;
+      }
+
+      // Ctrl+1..6 View Mode shortcuts
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+        if (e.key === '1') { e.preventDefault(); setViewMode('editor'); }
+        if (e.key === '2') { e.preventDefault(); setViewMode('mindmap'); }
+        if (e.key === '3') { e.preventDefault(); setViewMode('graph'); }
+        if (e.key === '4') { e.preventDefault(); setViewMode('study'); }
+        if (e.key === '5') { e.preventDefault(); setViewMode('tasks'); }
+        if (e.key === '6') { e.preventDefault(); setViewMode('dashboard'); }
       }
     };
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [
-    handleAddChildNode,
-    handleAddSiblingNode,
-    handleStartEditingNode,
-    handleStartEditingEdge,
-    handleDeleteEdge,
-    handleNavigate,
-    handleDeleteNode,
-    handleToggleCollapse,
-    handleSave,
-    handleOpen,
-    centerOnNode,
-    fitView,
-    handleOpenNodeExpansion,
-  ]);
+  }, [handleExportCurrentVault, handleOpenDailyNote]);
 
-  // Apply Layout Engine (Dagre or ELK)
-  const handleApplyLayout = useCallback(
-    async (layoutType: LayoutDirection, targetDensity: LayoutDensity = settings.layoutDensity) => {
-      setCurrentLayout(layoutType);
-      currentLayoutRef.current = layoutType;
-      setIsLayouting(true);
-      try {
-        if (layoutType === 'BALANCED_MINDMAP') {
-          const result = await getElkLayout(nodesWithChildCounts, edges, { density: targetDensity });
-          setNodes(result.nodes);
-          setEdges(result.edges);
-          showNotification(`Applied Balanced Mind Map (${targetDensity})`, 'success');
-        } else {
-          const result = await getDagreLayout(nodesWithChildCounts, edges, {
-            direction: layoutType as 'TB' | 'LR' | 'BT' | 'RL',
-            density: targetDensity,
-          });
-          setNodes(result.nodes);
-          setEdges(result.edges);
-          showNotification(
-            `Applied ${layoutType === 'TB' ? 'Top-Down' : 'Left-to-Right'} Layout (${targetDensity})`,
-            'success'
-          );
-        }
-        setTimeout(() => {
-          fitView({ duration: 400, padding: 0.2 });
-        }, 50);
-      } catch (err) {
-        console.error('Layout failed:', err);
-        showNotification('Layout calculation failed', 'error');
-      } finally {
-        setIsLayouting(false);
-      }
-    },
-    [nodesWithChildCounts, edges, setNodes, setEdges, fitView, showNotification, settings.layoutDensity]
-  );
-
-  // Toggle Node Lock / Pin in place
-  const handleToggleLock = useCallback(
-    (nodeId: string) => {
-      setNodes((nds) =>
-        nds.map((n) => {
-          if (n.id === nodeId) {
-            const nextLocked = !n.data?.locked;
-            showNotification(
-              nextLocked ? 'Node stuck in place (Locked)' : 'Node unlocked (Free to move)',
-              'info'
-            );
-            return {
-              ...n,
-              data: {
-                ...n.data,
-                locked: nextLocked,
-              },
-            };
-          }
-          return n;
-        })
-      );
-    },
-    [setNodes, showNotification]
-  );
-
-  // ⚡ Prefetch common modal chunks on browser idle time after initial render
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const prefetch = () => {
-        import('@/components/ui/SearchModal');
-        import('@/components/ui/CanvasThemeModal');
-        import('@/components/ui/KeyboardShortcutsModal');
-        import('@/components/ui/ExportMenu');
-      };
-      if ('requestIdleCallback' in window) {
-        const handle = (window as any).requestIdleCallback(prefetch, { timeout: 3000 });
-        return () => (window as any).cancelIdleCallback?.(handle);
-      } else {
-        const timeout = setTimeout(prefetch, 2500);
-        return () => clearTimeout(timeout);
-      }
-    }
-  }, []);
+  if (!workspace) {
+    return (
+      <div className="w-screen h-screen flex items-center justify-center bg-slate-900 text-white">
+        <div className="flex items-center gap-3">
+          <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+          <span className="font-bold text-sm">Loading Local Knowledge Vault...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="w-screen h-screen flex flex-col bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 overflow-hidden font-sans">
-      {/* Top Header Toolbar */}
-      <HeaderToolbar
-        fileName={activeFileName}
-        isSaving={isSaving}
-        onNew={() => {
-          handleNew();
-          setNodes(INITIAL_NODES);
-          setEdges(INITIAL_EDGES);
-          setSelectedNodeId('root-1');
-          setSelectedEdgeId(null);
-          showNotification('Created new whiteboard', 'info');
+    <div className="w-screen h-screen flex flex-col bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 overflow-hidden font-sans">
+      {/* Top Application Header */}
+      <UnifiedHeader
+        workspace={workspace}
+        currentMode={viewMode}
+        onSelectMode={(mode) => setViewMode(mode)}
+        onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
+        onCreatePage={() => {
+          handleCreatePage();
+          setViewMode('editor');
         }}
-        onOpen={handleOpen}
-        onSave={(forceSaveAs) => handleSave(forceSaveAs)}
-        onOpenCleanBoard={() => setIsCleanBoardOpen(true)}
-        onOpenSearch={() => setIsSearchOpen(true)}
-        onToggleOutline={() => setIsOutlineOpen((prev) => !prev)}
-        isOutlineOpen={isOutlineOpen}
-        onFoldLevel={handleFoldLevel}
+        onOpenDailyNote={handleOpenDailyNote}
+        onExportVault={handleExportCurrentVault}
+        onOpenVaultManager={() => setIsVaultManagerOpen(true)}
+        isAutoSaving={isAutoSaving}
+        isDarkMode={settings.theme === 'dark'}
         onToggleTheme={() =>
-          setSettings((s) => ({
-            ...s,
-            theme: s.theme === 'dark' ? 'light' : 'dark',
-          }))
+          setSettings((s) => ({ ...s, theme: s.theme === 'dark' ? 'light' : 'dark' }))
         }
-        isDarkTheme={settings.theme === 'dark'}
-        onOpenTimeMachine={() => setIsTimeMachineOpen(true)}
-        onOpenExport={() => setIsExportOpen(true)}
-        snapshotCount={snapshots.length}
-        secondsUntilNextSave={secondsUntilNextSave}
+        aiMode={workspace.settings.aiConnectionMode}
       />
 
-      {/* Main Diagramming Canvas */}
-      <main className="flex-1 relative overflow-hidden">
-        {/* Dynamic Root-to-Leaf Breadcrumbs Bar */}
-        <Breadcrumbs
-          selectedNodeId={selectedNodeId}
-          nodes={nodes}
-          edges={edges}
-          onSelectNode={(nodeId) => {
-            setSelectedNodeId(nodeId);
-            setSelectedEdgeId(null);
-            centerOnNode(nodeId, 300);
-          }}
-          isSpotlightActive={isSpotlightActive}
-          onToggleSpotlight={() => setIsSpotlightActive((prev) => !prev)}
-        />
-
-        {/* Outline Navigator & Search Drawer (Lazy Loaded) */}
-        {isOutlineOpen && (
-          <Suspense fallback={null}>
-            <OutlineNavigatorDrawer
-              isOpen={isOutlineOpen}
-              onClose={() => setIsOutlineOpen(false)}
-              nodes={nodes}
-              edges={edges}
-              selectedNodeId={selectedNodeId}
-              onSelectNode={(nodeId) => {
-                setSelectedNodeId(nodeId);
-                setSelectedEdgeId(null);
-                centerOnNode(nodeId, 300);
-              }}
-              onFoldLevel={handleFoldLevel}
-              onToggleCollapse={handleToggleCollapse}
+      {/* Main Workspace Body */}
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* VIEW 1: Knowledge Notebooks & Markdown Editor */}
+        {viewMode === 'editor' && (
+          <div className="flex-1 flex h-full overflow-hidden">
+            {/* Left Sidebar Tree */}
+            <NotebookSidebar
+              workspace={workspace}
+              activeNotebookId={workspace.activeNotebookId}
+              activeSectionId={workspace.activeSectionId}
+              activePageId={workspace.activePageId}
+              onSelectPage={handleSelectPage}
+              onSelectNotebook={handleSelectNotebook}
+              onCreateNotebook={handleCreateNotebook}
+              onCreateSection={handleCreateSection}
+              onCreatePage={(nbId, secId) => handleCreatePage(nbId, secId)}
+              onDeletePage={handleDeletePage}
+              onDeleteNotebook={handleDeleteNotebook}
+              onDeleteSection={handleDeleteSection}
+              onToggleFavorite={handleToggleFavorite}
+              onOpenDailyNote={handleOpenDailyNote}
+              onOpenTasksView={() => setViewMode('tasks')}
+              onOpenStudyView={() => setViewMode('study')}
+              selectedTag={selectedTag}
+              onSelectTag={setSelectedTag}
+              isCollapsed={isSidebarCollapsed}
+              onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
             />
-          </Suspense>
+
+            {/* Center Editor / Live Preview */}
+            {activePage ? (
+              <MarkdownEditor
+                page={activePage}
+                allPages={allPages}
+                onUpdateContent={handleUpdatePageContent}
+                onUpdateTitle={handleUpdatePageTitle}
+                onToggleFavorite={handleToggleFavorite}
+                onNavigateToPage={handleNavigateToPage}
+                onOpenMindMapForPage={handleOpenMindMapForPage}
+                onGenerateStudyDeck={() => setViewMode('study')}
+              />
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-400 bg-white dark:bg-slate-950">
+                <p className="text-sm font-medium mb-3">No page selected</p>
+                <button
+                  onClick={() => handleCreatePage()}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-purple-600 text-white"
+                >
+                  Create Note
+                </button>
+              </div>
+            )}
+
+            {/* Right Inspector Panel */}
+            {activePage && (
+              <NotebookInspectorPanel
+                page={activePage}
+                allPages={allPages}
+                backlinks={backlinks}
+                unlinkedMentions={unlinkedMentions}
+                aiSuggestions={aiSuggestions}
+                aiMode={workspace.settings.aiConnectionMode}
+                onChangeAiMode={(mode) =>
+                  persistWorkspace({
+                    ...workspace,
+                    settings: { ...workspace.settings, aiConnectionMode: mode },
+                  })
+                }
+                onAcceptAiSuggestion={handleAcceptAiSuggestion}
+                onRejectAiSuggestion={() => showNotification(`Ignored connection`, 'info')}
+                onConvertMentionToLink={handleConvertMentionToLink}
+                onNavigateToPage={handleNavigateToPage}
+                notebookMap={notebookMap}
+                sectionMap={sectionMap}
+              />
+            )}
+          </div>
         )}
 
-        <DiagramCanvas
-          nodes={nodesWithChildCounts}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          setEdges={setEdges}
-          setNodes={setNodes}
-          settings={settings}
-          selectedEdgeId={selectedEdgeId}
-          onToggleCollapse={handleToggleCollapse}
-          onToggleLock={handleToggleLock}
-          onUpdateNodeLabel={handleUpdateNodeLabel}
-          onCommitNodeLabel={handleCommitNodeLabel}
-          onAddChildNode={handleAddChildNode}
-          onAddSiblingNode={handleAddSiblingNode}
-          onStartEditingNode={handleStartEditingNode}
-          onStopEditingNode={handleStopEditingNode}
-          onSelectNode={(node) => {
-            const nextId = node ? node.id : null;
-            selectedNodeIdRef.current = nextId;
-            setSelectedNodeId(nextId);
-            if (node) {
-              selectedEdgeIdRef.current = null;
-              setSelectedEdgeId(null);
-              setNodes((nds) => {
-                const updated = nds.map((n) => ({
-                  ...n,
-                  selected: n.id === nextId,
-                }));
-                nodesRef.current = updated;
-                return updated;
-              });
-            }
-          }}
-          onSelectEdge={(edgeId) => {
-            selectedEdgeIdRef.current = edgeId;
-            setSelectedEdgeId(edgeId);
-            if (edgeId) {
-              selectedNodeIdRef.current = null;
-              setSelectedNodeId(null);
-            }
-          }}
-          onUpdateEdgeLabel={handleUpdateEdgeLabel}
-          onStartEditingEdge={handleStartEditingEdge}
-          onStopEditingEdge={handleStopEditingEdge}
-          onDeleteNode={handleDeleteNode}
-          onDeleteEdge={handleDeleteEdge}
-          onExpandWithAi={handleOpenNodeExpansion}
-        />
+        {/* VIEW 2: MapMind Visual Whiteboard Canvas */}
+        {viewMode === 'mindmap' && (
+          <div className="flex-1 h-full flex flex-col relative overflow-hidden">
+            {/* Whiteboard Header Toolbar */}
+            <HeaderToolbar
+              fileName="Whiteboard Diagram"
+              isSaving={false}
+              onNew={() => setIsCleanBoardOpen(true)}
+              onOpen={() => {}}
+              onSave={() => handleExportMindMapToNote()}
+              onOpenCleanBoard={() => setIsCleanBoardOpen(true)}
+              onOpenSearch={() => setIsCommandPaletteOpen(true)}
+              onToggleOutline={() => {}}
+              isOutlineOpen={false}
+              onFoldLevel={() => {}}
+              onToggleTheme={() =>
+                setSettings((s) => ({ ...s, theme: s.theme === 'dark' ? 'light' : 'dark' }))
+              }
+              isDarkTheme={settings.theme === 'dark'}
+              onOpenTimeMachine={() => {}}
+              onOpenExport={() => setIsExportOpen(true)}
+              snapshotCount={0}
+              secondsUntilNextSave={180}
+            />
 
-        {/* Modern Floating Action Dock */}
-        <FloatingActionDock
-          onAddNode={handleAddNode}
-          onOpenAiImport={() => setIsAiImportOpen(true)}
-          selectedNodeId={selectedNodeId}
-          onOpenNodeExpansion={handleOpenNodeExpansion}
-          onOpenPresentation={() => setIsPresentationOpen(true)}
-          isSpotlightActive={isSpotlightActive}
-          onToggleSpotlight={() => setIsSpotlightActive((prev) => !prev)}
-          sketchMode={settings.sketchMode}
-          onToggleSketchMode={() =>
-            setSettings((s) => ({ ...s, sketchMode: !s.sketchMode }))
-          }
-          onApplyLayout={handleApplyLayout}
-          isLayouting={isLayouting}
-          onOpenCanvasTheme={() => setIsCanvasThemeOpen(true)}
-          onOpenShortcuts={() => setIsShortcutsOpen(true)}
-          edgeRoutingStyle={settings.edgeRoutingStyle}
-          onChangeEdgeRoutingStyle={(style) =>
-            setSettings((s) => ({ ...s, edgeRoutingStyle: style }))
-          }
-          collisionAvoidance={settings.collisionAvoidance}
-          onToggleCollisionAvoidance={() => {
-            const next = !settings.collisionAvoidance;
-            setSettings((s) => ({ ...s, collisionAvoidance: next }));
-            showNotification(
-              next
-                ? 'Collision Avoidance enabled (Hold Alt to overlap)'
-                : 'Collision Avoidance disabled (Free overlap allowed)',
-              'info'
-            );
-          }}
-          layoutDensity={settings.layoutDensity}
-          onChangeLayoutDensity={(density) => {
-            setSettings((s) => ({ ...s, layoutDensity: density }));
-            handleApplyLayout(currentLayout, density);
-          }}
-        />
+            {/* Canvas Diagram Viewport */}
+            <div className="flex-1 w-full h-full relative">
+              <DiagramCanvas
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                setEdges={setEdges}
+                setNodes={setNodes}
+                settings={settings}
+                onToggleCollapse={(nodeId) => {
+                  const node = nodes.find(n => n.id === nodeId);
+                  if (node) handleUpdateNode(nodeId, { collapsed: !node.data?.collapsed });
+                }}
+                onToggleLock={(nodeId) => {
+                  const node = nodes.find(n => n.id === nodeId);
+                  if (node) handleUpdateNode(nodeId, { locked: !node.data?.locked });
+                }}
+                onUpdateNodeLabel={(nodeId, label) => handleUpdateNode(nodeId, { label })}
+                onCommitNodeLabel={(nodeId, label, action) => {
+                  handleUpdateNode(nodeId, { label, isEditing: false });
+                  if (action === 'add-child') {
+                    const parent = nodes.find((n) => n.id === nodeId);
+                    if (!parent) return;
+                    const newId = `node-${Date.now()}`;
+                    const newNode: MapMindNode = {
+                      id: newId,
+                      type: 'custom',
+                      position: { x: parent.position.x + 260, y: parent.position.y + 60 },
+                      data: { label: 'New Topic', colorTheme: 'purple', shape: 'pill', isEditing: true },
+                    };
+                    const newEdge: MapMindEdge = {
+                      id: `edge-${nodeId}-${newId}`,
+                      source: nodeId,
+                      target: newId,
+                      type: 'custom',
+                    };
+                    setNodes((nds) => [...nds, newNode]);
+                    setEdges((eds) => [...eds, newEdge]);
+                    setSelectedNodeId(newId);
+                  }
+                }}
+                onAddChildNode={(parentId) => {
+                  const parent = nodes.find((n) => n.id === parentId);
+                  if (!parent) return;
+                  const newId = `node-${Date.now()}`;
+                  const newNode: MapMindNode = {
+                    id: newId,
+                    type: 'custom',
+                    position: { x: parent.position.x + 260, y: parent.position.y + 60 },
+                    data: { label: 'New Topic', colorTheme: 'purple', shape: 'pill' },
+                  };
+                  const newEdge: MapMindEdge = {
+                    id: `edge-${parentId}-${newId}`,
+                    source: parentId,
+                    target: newId,
+                    type: 'custom',
+                  };
+                  setNodes((nds) => [...nds, newNode]);
+                  setEdges((eds) => [...eds, newEdge]);
+                  setSelectedNodeId(newId);
+                }}
+                onAddSiblingNode={(siblingId) => {
+                  const incoming = edges.find((e) => e.target === siblingId);
+                  const parentId = incoming ? incoming.source : 'root-1';
+                  const sibling = nodes.find((n) => n.id === siblingId);
+                  if (!sibling) return;
 
-        {/* Selected Node Properties Inspector */}
-        <NodeInspector
-          selectedNode={selectedNode}
-          incomingEdge={incomingEdge}
-          onUpdateNode={handleUpdateNode}
-          onUpdateEdgeLabel={handleUpdateEdgeLabel}
-          onDeleteNode={handleDeleteNode}
-          onClose={() => setSelectedNodeId(null)}
-        />
-      </main>
+                  const newId = `node-${Date.now()}`;
+                  const newNode: MapMindNode = {
+                    id: newId,
+                    type: 'custom',
+                    position: { x: sibling.position.x, y: sibling.position.y + 80 },
+                    data: { label: 'New Sibling', colorTheme: 'purple', shape: 'pill' },
+                  };
+                  const newEdge: MapMindEdge = {
+                    id: `edge-${parentId}-${newId}`,
+                    source: parentId,
+                    target: newId,
+                    type: 'custom',
+                  };
+                  setNodes((nds) => [...nds, newNode]);
+                  setEdges((eds) => [...eds, newEdge]);
+                  setSelectedNodeId(newId);
+                }}
+                onStartEditingNode={(nodeId) => handleUpdateNode(nodeId, { isEditing: true })}
+                onStopEditingNode={(nodeId) => handleUpdateNode(nodeId, { isEditing: false })}
+                onSelectNode={(node) => setSelectedNodeId(node ? node.id : null)}
+                onExpandWithAi={(nodeId) => {
+                  setAiExpandTargetNodeId(nodeId);
+                  setIsAiExpandModalOpen(true);
+                }}
+              />
 
-      {/* Ctrl+K Fuzzy Search Command Palette (Lazy Loaded) */}
-      {isSearchOpen && (
-        <Suspense fallback={null}>
-          <SearchModal
-            isOpen={isSearchOpen}
-            onClose={() => setIsSearchOpen(false)}
-            nodes={nodes}
-            edges={edges}
-            onSelectNode={(nodeId) => {
-              setSelectedNodeId(nodeId);
-              centerOnNode(nodeId, 450, 1.25);
+              {/* Whiteboard Floating Action Dock */}
+              <FloatingActionDock
+                onAddNode={() => handleAddChildToNode(selectedNodeId || nodes[0]?.id)}
+                onAddChild={() => handleAddChildToNode(selectedNodeId || nodes[0]?.id)}
+                onAddSibling={() => handleAddSiblingToNode(selectedNodeId || nodes[0]?.id)}
+                onStartEditing={() => selectedNodeId && handleUpdateNode(selectedNodeId, { isEditing: true })}
+                onDeleteNode={() => selectedNodeId && handleDeleteNode(selectedNodeId)}
+                onOpenAiImport={() => setIsAiImportOpen(true)}
+                onOpenPresentation={() => {}}
+                isSpotlightActive={false}
+                onToggleSpotlight={() => {}}
+                sketchMode={settings.sketchMode}
+                onToggleSketchMode={() => setSettings((s) => ({ ...s, sketchMode: !s.sketchMode }))}
+                onApplyLayout={(layout) => handleApplyLayout(layout)}
+                isLayouting={false}
+                onOpenCanvasTheme={() => setIsCanvasThemeOpen(true)}
+                onOpenShortcuts={() => setIsShortcutsOpen(true)}
+                edgeRoutingStyle={settings.edgeRoutingStyle}
+                onChangeEdgeRoutingStyle={(style) => setSettings((s) => ({ ...s, edgeRoutingStyle: style }))}
+                collisionAvoidance={settings.collisionAvoidance}
+                onToggleCollisionAvoidance={() =>
+                  setSettings((s) => ({ ...s, collisionAvoidance: !s.collisionAvoidance }))
+                }
+                layoutDensity={settings.layoutDensity}
+                onChangeLayoutDensity={(density) => {
+                  setSettings((s) => ({ ...s, layoutDensity: density }));
+                  handleApplyLayout(currentLayout, density);
+                }}
+                selectedNodeId={selectedNodeId}
+                onOpenNodeExpansion={(nodeId) => {
+                  setAiExpandTargetNodeId(nodeId);
+                  setIsAiExpandModalOpen(true);
+                }}
+              />
+
+              {/* Node Inspector Drawer */}
+              <NodeInspector
+                selectedNode={nodes.find((n) => n.id === selectedNodeId) || null}
+                incomingEdge={edges.find((e) => e.target === selectedNodeId) || null}
+                onUpdateNode={handleUpdateNode}
+                onUpdateEdgeLabel={(edgeId, label) => {
+                  setEdges((eds) =>
+                    eds.map((e) => (e.id === edgeId ? { ...e, label, data: { ...e.data, label } } : e))
+                  );
+                }}
+                onDeleteNode={handleDeleteNode}
+                onClose={() => setSelectedNodeId(null)}
+              />
+
+              {/* Export to Note Button Floating Top-Right */}
+              <div className="absolute top-4 right-4 z-20">
+                <button
+                  onClick={handleExportMindMapToNote}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white dark:bg-slate-900 text-purple-700 dark:text-purple-300 shadow-lg border border-purple-200 dark:border-purple-800 hover:bg-purple-50 transition-all flex items-center gap-1.5"
+                >
+                  <BookOpen className="w-4 h-4" />
+                  <span>Save as Markdown Note</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* VIEW 3: 2D Interactive Knowledge Graph */}
+        {viewMode === 'graph' && (
+          <KnowledgeGraphView
+            workspace={workspace}
+            allPages={allPages}
+            aiSuggestions={aiSuggestions}
+            activePageId={workspace.activePageId}
+            onSelectPage={(pageId) => {
+              const p = allPages.find((item) => item.id === pageId);
+              if (p) {
+                handleSelectPage(p.notebookId, p.sectionId, p.id);
+                setViewMode('editor');
+              }
+            }}
+            onOpenMindMap={handleOpenMindMapForPage}
+            isDarkMode={settings.theme === 'dark'}
+          />
+        )}
+
+        {/* VIEW 4: Study & Learning Hub */}
+        {viewMode === 'study' && (
+          <StudyHubView
+            workspace={workspace}
+            allPages={allPages}
+            activePageId={workspace.activePageId}
+            onSelectPage={(pageId) => {
+              const p = allPages.find((item) => item.id === pageId);
+              if (p) {
+                handleSelectPage(p.notebookId, p.sectionId, p.id);
+                setViewMode('editor');
+              }
             }}
           />
-        </Suspense>
-      )}
+        )}
 
-      {/* Presentation Tour Mode (Lazy Loaded) */}
-      {isPresentationOpen && (
+        {/* VIEW 5: Vault Tasks */}
+        {viewMode === 'tasks' && (
+          <TasksView
+            allPages={allPages}
+            notebookMap={notebookMap}
+            sectionMap={sectionMap}
+            onUpdateContent={handleUpdatePageContent}
+            onSelectPage={(pageId) => {
+              const p = allPages.find((item) => item.id === pageId);
+              if (p) {
+                handleSelectPage(p.notebookId, p.sectionId, p.id);
+                setViewMode('editor');
+              }
+            }}
+          />
+        )}
+
+        {/* VIEW 6: Home Dashboard */}
+        {viewMode === 'dashboard' && (
+          <DashboardView
+            workspace={workspace}
+            allPages={allPages}
+            aiSuggestions={aiSuggestions}
+            onSelectPage={(pageId) => {
+              const p = allPages.find((item) => item.id === pageId);
+              if (p) {
+                handleSelectPage(p.notebookId, p.sectionId, p.id);
+                setViewMode('editor');
+              }
+            }}
+            onCreatePage={() => {
+              handleCreatePage();
+              setViewMode('editor');
+            }}
+            onSelectMode={(mode) => setViewMode(mode)}
+            onAcceptAiSuggestion={handleAcceptAiSuggestion}
+            notebookMap={notebookMap}
+            sectionMap={sectionMap}
+          />
+        )}
+      </div>
+
+      {/* Universal Command Palette (Ctrl+K / Cmd+K) */}
+      <UniversalCommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        workspace={workspace}
+        allPages={allPages}
+        onSelectPage={(pageId) => {
+          const p = allPages.find((item) => item.id === pageId);
+          if (p) {
+            handleSelectPage(p.notebookId, p.sectionId, p.id);
+            setViewMode('editor');
+          }
+        }}
+        onSelectMode={(mode) => setViewMode(mode)}
+        onCreatePage={() => {
+          handleCreatePage();
+          setViewMode('editor');
+        }}
+        onOpenDailyNote={handleOpenDailyNote}
+        onExportVault={() => exportWorkspaceAsJson(workspace)}
+        onOpenVaultManager={() => setIsVaultManagerOpen(true)}
+        onExportAllVaults={handleExportAllVaultsBundle}
+        onWipeDeviceData={handleWipeDeviceData}
+        onToggleTheme={() =>
+          setSettings((s) => ({ ...s, theme: s.theme === 'dark' ? 'light' : 'dark' }))
+        }
+        isDarkMode={settings.theme === 'dark'}
+      />
+
+      {/* Canvas Modals */}
+      {isExportOpen && (
         <Suspense fallback={null}>
-          <PresentationMode
-            isOpen={isPresentationOpen}
-            onClose={() => setIsPresentationOpen(false)}
+          <ExportMenu
+            onClose={() => setIsExportOpen(false)}
             nodes={nodes}
             edges={edges}
-            onFocusNode={(nodeId, zoom) => centerOnNode(nodeId, 450, zoom)}
-            onFitView={() => fitView({ duration: 500 })}
+            settings={settings}
+            onNotify={showNotification}
           />
         </Suspense>
       )}
 
-      {/* AI Chatbot to Mind Map Generator Modal (Lazy Loaded) */}
-      {isAiImportOpen && (
-        <Suspense fallback={null}>
-          <ErrorBoundary fallbackTitle="AI Mind Map Generator">
-            <AiChatMindMapModal
-              isOpen={isAiImportOpen}
-              onClose={() => setIsAiImportOpen(false)}
-              selectedNodeId={selectedNodeId}
-              currentNodes={nodes}
-              currentEdges={edges}
-              onApplyMindMap={handleApplyAiMindMap}
-              onNotify={showNotification}
-            />
-          </ErrorBoundary>
-        </Suspense>
-      )}
-
-      {/* Context-Aware AI Node Expansion Modal (Lazy Loaded) */}
-      {isAiExpandModalOpen && (
-        <Suspense fallback={null}>
-          <ErrorBoundary fallbackTitle="AI Node Expansion">
-            <NodeExpansionModal
-              isOpen={isAiExpandModalOpen}
-              onClose={() => setIsAiExpandModalOpen(false)}
-              targetNodeId={aiExpandTargetNodeId}
-              nodes={nodesWithChildCounts}
-              edges={edges}
-              onApplyExpansion={handleApplyNodeExpansion}
-              onNotify={showNotification}
-            />
-          </ErrorBoundary>
-        </Suspense>
-      )}
-
-      {/* Clean Whiteboard Modal (Lazy Loaded) */}
-      {isCleanBoardOpen && (
-        <Suspense fallback={null}>
-          <CleanBoardModal
-            isOpen={isCleanBoardOpen}
-            onClose={() => setIsCleanBoardOpen(false)}
-            onConfirmClean={handleCleanBoard}
-            nodeCount={nodes.length}
-          />
-        </Suspense>
-      )}
-
-      {/* Canvas Background & Mood Modal (Lazy Loaded) */}
       {isCanvasThemeOpen && (
         <Suspense fallback={null}>
           <CanvasThemeModal
@@ -1810,19 +1446,77 @@ export function AppContent() {
         </Suspense>
       )}
 
-      {/* Quick Tag Modal (Shortcut: 't' or '#') (Lazy Loaded) */}
-      {isQuickTagOpen && (
+      {isAiImportOpen && (
         <Suspense fallback={null}>
-          <QuickTagModal
-            isOpen={isQuickTagOpen}
-            onClose={() => setIsQuickTagOpen(false)}
-            selectedNode={selectedNode}
-            onUpdateTags={(nodeId, tags) => handleUpdateNode(nodeId, { tags })}
+          <ErrorBoundary fallbackTitle="AI Mind Map Generator">
+            <AiChatMindMapModal
+              isOpen={isAiImportOpen}
+              onClose={() => setIsAiImportOpen(false)}
+              selectedNodeId={selectedNodeId}
+              currentNodes={nodes}
+              currentEdges={edges}
+              onApplyMindMap={(newNodes, newEdges) => {
+                setNodes(newNodes);
+                setEdges(newEdges);
+                setIsAiImportOpen(false);
+                setTimeout(() => fitView({ duration: 500 }), 100);
+              }}
+              onNotify={showNotification}
+            />
+          </ErrorBoundary>
+        </Suspense>
+      )}
+
+      {isAiExpandModalOpen && (
+        <Suspense fallback={null}>
+          <ErrorBoundary fallbackTitle="AI Node Expansion">
+            <NodeExpansionModal
+              isOpen={isAiExpandModalOpen}
+              onClose={() => setIsAiExpandModalOpen(false)}
+              targetNodeId={aiExpandTargetNodeId}
+              nodes={nodes}
+              edges={edges}
+              onApplyExpansion={(newNodes, newEdges) => {
+                setNodes(newNodes);
+                setEdges(newEdges);
+                setIsAiExpandModalOpen(false);
+                setTimeout(() => fitView({ duration: 500 }), 100);
+              }}
+              onNotify={showNotification}
+            />
+          </ErrorBoundary>
+        </Suspense>
+      )}
+
+      {isCleanBoardOpen && (
+        <Suspense fallback={null}>
+          <CleanBoardModal
+            isOpen={isCleanBoardOpen}
+            onClose={() => setIsCleanBoardOpen(false)}
+            onConfirmClean={() => {
+              setNodes([
+                {
+                  id: 'root-1',
+                  type: 'custom',
+                  position: { x: 0, y: 0 },
+                  selected: true,
+                  data: {
+                    label: 'Central Topic',
+                    isRoot: true,
+                    colorTheme: 'blue',
+                    shape: 'pill',
+                  },
+                },
+              ]);
+              setEdges([]);
+              setSelectedNodeId('root-1');
+              setIsCleanBoardOpen(false);
+            }}
+            nodeCount={nodes.length}
           />
         </Suspense>
       )}
 
-      {/* Keyboard Shortcuts Modal (Lazy Loaded) */}
       {isShortcutsOpen && (
         <Suspense fallback={null}>
           <KeyboardShortcutsModal
@@ -1832,37 +1526,22 @@ export function AppContent() {
         </Suspense>
       )}
 
-      {/* Time Machine Modal (Lazy Loaded) */}
-      {isTimeMachineOpen && (
-        <Suspense fallback={null}>
-          <TimeMachineModal
-            isOpen={isTimeMachineOpen}
-            onClose={() => setIsTimeMachineOpen(false)}
-            snapshots={snapshots}
-            onRestore={(snapshot) =>
-              handleRestoreState(snapshot.state.nodes, snapshot.state.edges)
-            }
-            onDeleteSnapshot={deleteSnapshot}
-            onClearHistory={clearHistory}
-            secondsUntilNextSave={secondsUntilNextSave}
-          />
-        </Suspense>
-      )}
+      {/* Vault Manager Modal */}
+      <VaultManagerModal
+        isOpen={isVaultManagerOpen}
+        onClose={() => setIsVaultManagerOpen(false)}
+        currentVault={workspace}
+        vaultList={vaultList}
+        onSwitchVault={handleSwitchVault}
+        onCreateVault={handleCreateVault}
+        onExportCurrentVault={handleExportCurrentVault}
+        onExportAllVaultsBundle={handleExportAllVaultsBundle}
+        onImportVaultFile={handleImportVaultFile}
+        onDeleteVault={handleDeleteVault}
+        onWipeDeviceData={handleWipeDeviceData}
+      />
 
-      {/* Export Menu Modal (Lazy Loaded) */}
-      {isExportOpen && (
-        <Suspense fallback={null}>
-          <ExportMenu
-            onClose={() => setIsExportOpen(false)}
-            nodes={nodesWithChildCounts}
-            edges={edges}
-            settings={settings}
-            onNotify={showNotification}
-          />
-        </Suspense>
-      )}
-
-      {/* Notification Toast */}
+      {/* Toast Notification */}
       {toast && (
         <div
           className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl text-xs font-semibold shadow-lg backdrop-blur-md animate-in fade-in slide-in-from-bottom-2 duration-150 flex items-center gap-2 ${

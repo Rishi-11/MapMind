@@ -1,91 +1,93 @@
-# 🧠 MapMind - Advanced Diagramming & Whiteboard Application
+# 🧠 MapMind - Local-First AI Knowledge Notebook & Mind Map Studio
 
-A high-performance, client-side-only diagramming and whiteboard web application built with **React 18**, **TypeScript**, **Vite**, **@xyflow/react (React Flow)**, **Dagre**, **ELK.js**, **Rough.js**, **idb (IndexedDB)**, and **browser-fs-access**.
+A unified, high-performance, 100% client-side web application combining an **Advanced Mind Mapping & Whiteboard Canvas** with a **Local-First AI Knowledge Notebook**.
 
-Containerized with **Docker** for instant local development and production static hosting with **Nginx**.
-
----
-
-## ✨ Key Features & Architecture
-
-### 1. 🤖 AI Chatbot to Mind Map Generator (`/src/lib/importers/`)
-- **Universal AI Prompt Copier**: 1-click tailored instructions for **ChatGPT**, **Claude**, **Gemini**, **DeepSeek**, or **Copilot** to convert chat discussions, brainstorms, meeting notes, or architecture breakdowns into mind map structures.
-- **Smart Direct Generator**: Paste the chatbot's response (Markdown bulleted list, Mermaid `mindmap`, or JSON) $\rightarrow$ MapMind parses and arranges it into a balanced radial mind map or hierarchy with automatic harmonious color palettes across main branches.
-- **Replace or Attach**: Choose to replace the entire whiteboard or attach the AI branch directly to your selected node.
-
-### 2. 🌾 Canvas Moods & Paper Atmosphere (`/src/lib/canvasThemes.ts`)
-- **7 Curated Canvas Palettes**:
-  - 🌾 **Warm Paper**: Warm ivory cream parchment (`#fbf8f2` / `#1c1a16` sepia night) for easy on-the-eyes reading & brainstorming.
-  - ☕ **Solarized Ochre**: Classic editorial warm cream & teal.
-  - 🌿 **Botanical Sage**: Calming mint sage & deep forest.
-  - 🌸 **Rosé Velvet**: Delicate blush paper & dark berry wine.
-  - 🏔️ **Cool Slate**: Crisp modern white & slate navy.
-  - 🌑 **Midnight Charcoal**: Pure matte OLED pitch dark.
-  - 🌌 **Cyber Space**: Deep cosmic space navy & sky ice blue.
-- **Grid Patterns**: Dots Matrix, Crosshairs, Notebook Grid Lines, or Blank Canvas.
-
-### 3. 🎨 Rich Card Aesthetics & Shapes (`/src/components/canvas/`)
-- **6 Card Aesthetic Presets**:
-  - 🧊 **Frosted Glass**: Translucent acrylic glassmorphism (`backdrop-blur-2xl`) with top gloss reflection line.
-  - 🪶 **Minimalist Clean**: Floating borderless card with bold left vertical accent bar (`border-l-4`).
-  - 📄 **Notion Clean**: Document page card with `📄 Page Document` header divider and monospace metadata.
-  - 💥 **Neo-Brutalist Bold**: High-contrast 2.5px solid border with offset retro sticker shadow (`5px 5px`).
-  - ✨ **Aesthetic Glow**: Ambient neon halo with multi-stop gradient wash.
-  - 🎴 **Standard**: Clean modern rounded card.
-- **6 Geometries**: Card, Pill Capsule, Cloud Bubble, Sharp Square, Top Banner Strip, Diamond Badge.
-
-### 4. 🧹 Clean Whiteboard with Time Machine Protection
-- Clean slate with fresh central topic or completely blank canvas.
-- **Automatic Recovery Snapshot**: Saves an instant backup snapshot to IndexedDB Time Machine before wiping so you never lose data.
-
-### 5. 🔄 Dynamic Smart Handles & Stick-in-Place Locking
-- **Automatic Real-Time Handle Flipping**: Dragging nodes from left to right or right to left flips connecting ports automatically.
-- **Stick in Place (Lock)**: Click <kbd>🔒</kbd> on any node to lock its coordinates firmly in place (`draggable: false`).
-
-### 6. 💾 Storage & State Management (`/src/lib/storage/`)
-- **Native File System (`browser-fs-access`)**: Retains `FileSystemFileHandle` for silent `Ctrl+S` auto-overwrite.
-- **Time Machine History (`idb`)**: 3-minute automatic background snapshots in IndexedDB.
-
-### 7. 🖌️ Clean Presentation Exports (`/src/components/ui/`)
-- **No Side Connection Dots**: Filters out editor handles (`.react-flow__handle`) and editing buttons from all PNG, PDF, and SVG exports.
-- **Preserve Canvas Atmosphere**: Option to match your chosen warm paper or editorial palette in the final render.
+Built with **React 18**, **TypeScript**, **Vite**, **Tailwind CSS**, **@xyflow/react (React Flow)**, **Dagre**, **ELK.js**, **Rough.js**, and **idb (IndexedDB)**.
 
 ---
 
-## 🚀 Running with Docker
+## 🌟 Core Product Features
 
-### Development Mode (with Vite HMR)
+### 1. 📓 Digital Knowledge Notebook
+- **Full Hierarchy**: Workspace $\rightarrow$ Notebooks $\rightarrow$ Sections $\rightarrow$ Markdown Pages.
+- **Markdown Editor Modes**:
+  - **Live Preview Mode**: Rich formatting, clickable `[[Wiki Links]]`, interactive task checklist toggling (`- [ ]`, `- [x]`), callout admonitions (`> [!NOTE]`, `> [!TIP]`, `> [!WARNING]`), KaTeX math, tables, and syntax-highlighted code blocks with 1-click copy.
+  - **Source Mode**: Clean monospaced editing with fast auto-closing brackets.
+  - **Split Mode**: Side-by-side synchronized editor + live preview.
+- **Obsidian-Style Wiki Links**: Type `[[` to trigger autocomplete across all notes in your vault.
+- **Deterministic Backlinks & Unlinked Mentions**: Automatically extracts incoming backlinks with context snippets and detects unlinked page mentions with a 1-click "+ Link" converter.
+- **YAML Frontmatter & Properties**: Visual property badges for type, status, priority, and tags.
+
+### 2. 🧠 Visual Mind Mapping & Whiteboard Studio
+- **Radial & Tree Layouts**: ELK.js balanced left/right mind maps and Dagre top-down / left-right directed graphs.
+- **Bi-Directional Bridge**:
+  - **Note $\rightarrow$ Mind Map**: 1-click converts any Markdown note into an interactive diagram hierarchy.
+  - **Mind Map $\rightarrow$ Note**: 1-click exports diagram branches and whiteboard nodes into structured Markdown notes.
+- **Rich Aesthetics**: 7 canvas atmosphere palettes (Warm Paper, Botanical Sage, Solarized Ochre, Cyber Space, etc.) and 6 card aesthetics (Frosted Glass, Notion Clean, Neo-Brutalist, Aesthetic Glow).
+- **Presentation Mode & Clean Vector Exports**: Export as SVG, PNG, or PDF with editor handles filtered out.
+
+### 3. 🕸️ 2D Interactive Knowledge Graph
+- Force-directed physics canvas visualizing notes as nodes and links as edges.
+- Color-coded by Notebook or Page Type.
+- Visual distinction: Solid edges for manual Wiki Links, glowing purple dashed edges for AI suggested connections.
+- Filter by Notebook, Tags, and zoom/pan controls.
+
+### 4. 🤖 Local Multi-Signal AI & Knowledge Assistant
+- **100% Client-Side Privacy**: Computes relationships, embeddings, and search vectors locally with zero server requirements.
+- **Multi-Signal Relationship Engine**:
+  1. Semantic / TF-IDF cosine similarity (50%)
+  2. Shared concepts & keyword intersection (20%)
+  3. Graph link distance (15%)
+  4. Shared tags & properties (10%)
+  5. Title token match (5%)
+- **4 Connection Modes**: Off, Suggest, Assisted, Autonomous.
+- **"Ask My Knowledge" Assistant**: Ask questions and receive synthesized answers citing your local notes (`[[Source]]`).
+
+### 5. 📚 Study & Learning Hub
+- **Interactive Flashcards**: Spaced repetition algorithm (SM-2) with 3D flip animation and difficulty ratings (Hard, Good, Easy).
+- **Automated Quizzes**: Generates multiple-choice verification quizzes based on note content with instant scoring.
+- **Executive Summaries**: Automated extraction of core takeaways, reading time, and prerequisites.
+
+### 6. ⚡ Vault Tasks & Daily Notes
+- **Task Aggregator**: Centralized view of all `- [ ]` and `- [x]` markdown checklists across notes.
+- **Daily Notes**: 1-click creates or opens today's daily journal note (`Daily Note - YYYY-MM-DD`).
+
+---
+
+## ⌨️ Universal Keyboard Shortcuts
+
+| Shortcut | Action |
+|---|---|
+| <kbd>Ctrl + K</kbd> / <kbd>Cmd + K</kbd> | Universal Command Palette & Search |
+| <kbd>Ctrl + P</kbd> / <kbd>Cmd + P</kbd> | Quick Open Page |
+| <kbd>Ctrl + 1</kbd> | Switch to Knowledge Notes View |
+| <kbd>Ctrl + 2</kbd> | Switch to Mind Map Whiteboard View |
+| <kbd>Ctrl + 3</kbd> | Switch to 2D Knowledge Graph View |
+| <kbd>Ctrl + 4</kbd> | Switch to Study & Quiz Hub |
+| <kbd>Ctrl + 5</kbd> | Switch to Vault Tasks View |
+| <kbd>Ctrl + 6</kbd> | Switch to Dashboard Hub |
+| <kbd>Tab</kbd> | Add Child Node (in Mind Map) |
+| <kbd>Enter</kbd> | Add Sibling Node (in Mind Map) |
+| <kbd>Space</kbd> / <kbd>F2</kbd> | Edit Selected Node (in Mind Map) |
+| <kbd>[[</kbd> | Trigger Wiki Link Autocomplete (in Editor) |
+
+---
+
+## 🚀 Running Locally
+
+### Development Mode
+```bash
+npm install
+npm run dev
+```
+
+### Production Build
+```bash
+npm run build
+```
+
+### Docker
 ```bash
 docker compose up
 ```
 Open [http://localhost:5173](http://localhost:5173) in your browser.
-
-### Production Build & Nginx Serving
-```bash
-docker build --target production -t mapmind:prod .
-docker run -d -p 8080:80 mapmind:prod
-```
-Open [http://localhost:8080](http://localhost:8080) in your browser.
-
----
-
-## ⌨️ Keyboard-First Mind Mapping
-
-| Action | Shortcut | Behavior |
-|---|---|---|
-| **Add Child Node** | <kbd>Tab</kbd> | Creates child node & immediately starts editing |
-| **Add Sibling Node** | <kbd>Enter</kbd> | Creates sibling node & immediately starts editing |
-| **Edit Selected Node** | <kbd>Space</kbd> or <kbd>F2</kbd> | Enters inline text editing mode |
-| **Commit & Next Sibling** | <kbd>Enter</kbd> (in input) | Saves label and creates next sibling |
-| **Commit & Create Child** | <kbd>Tab</kbd> (in input) | Saves label and creates child branch |
-| **Exit Edit Mode** | <kbd>Escape</kbd> | Commits text and returns focus to canvas |
-| **Center / Focus View** | <kbd>f</kbd> | Smoothly pans and centers on active node |
-| **Fit Full View** | <kbd>Shift + F</kbd> | Zooms to fit all whiteboard elements |
-| **Navigate Up / Down** | <kbd>↑</kbd> / <kbd>↓</kbd> | Moves to adjacent sibling or vertical neighbor |
-| **Navigate In / Out** | <kbd>→</kbd> / <kbd>←</kbd> | Traverses between parents and children |
-| **Delete Node** | <kbd>Delete</kbd> / <kbd>Backspace</kbd> | Deletes node and auto-selects parent |
-| **Toggle Subtree** | <kbd>c</kbd> or <kbd>/</kbd> | Collapses or expands descendant branches |
-| **Shortcuts Cheat Sheet** | <kbd>?</kbd> | Opens interactive shortcut cheatsheet |
-| **Silent Save File** | <kbd>Ctrl + S</kbd> | Silently overwrites active file |
-| **Save As New File** | <kbd>Ctrl + Shift + S</kbd> | Prompts file destination dialog |
-| **Open Diagram File** | <kbd>Ctrl + O</kbd> | Opens `.mapmind.json` or `.json` file |
