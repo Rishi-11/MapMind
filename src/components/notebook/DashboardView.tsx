@@ -94,9 +94,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   }, [workspace.notebooks, allPages, allVaultTasks, notebookMap, sectionMap, aiSuggestions.length]);
 
   return (
-    <div className="flex-1 h-full flex flex-col bg-slate-50 dark:bg-slate-950 overflow-y-auto custom-scrollbar select-none p-6 sm:p-8 space-y-8 max-w-6xl mx-auto w-full">
+    <div className="flex-1 h-full flex flex-col bg-slate-50 dark:bg-slate-950 overflow-y-auto custom-scrollbar select-none p-4 sm:p-6 lg:p-8 space-y-6 max-w-6xl mx-auto w-full">
       {/* Welcome Banner */}
-      <div className="relative overflow-hidden bg-gradient-to-r from-purple-700 via-indigo-600 to-blue-600 rounded-3xl p-6 sm:p-8 text-white shadow-xl">
+      <div className="relative overflow-hidden bg-gradient-to-r from-purple-700 via-indigo-600 to-blue-600 rounded-3xl p-5 sm:p-8 text-white shadow-xl">
         <div className="relative z-10 max-w-2xl space-y-3">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/20 backdrop-blur-md text-xs font-semibold">
             <Sparkles className="w-3.5 h-3.5" />

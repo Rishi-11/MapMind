@@ -16,6 +16,7 @@ const SHORTCUT_GROUPS = [
       { key: 'Ctrl + S', desc: 'Save / Export Active Vault JSON Backup' },
       { key: 'Ctrl + O', desc: 'Open / Import Vault JSON File' },
       { key: 'Ctrl + K / Ctrl + P', desc: 'Fuzzy Search Command Palette to find any note or action' },
+      { key: 'Ctrl + J', desc: 'Toggle Right Inspector / AI Assistant Panel' },
       { key: 'Ctrl + N', desc: 'Create New Markdown Note' },
       { key: 'Ctrl + D', desc: "Open Today's Daily Note" },
       { key: '[[', desc: 'WikiLink autocomplete & instant note creator' },

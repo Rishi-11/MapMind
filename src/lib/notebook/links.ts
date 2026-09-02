@@ -243,7 +243,7 @@ export function convertMentionToWikiLink(content: string, targetTitle: string): 
 }
 
 /**
- * Extracts all task checklist items across all pages
+ * Extracts all task checklist items across all pages with true line index mapping
  */
 export function extractMarkdownTasks(
   pages: Page[],
@@ -253,10 +253,23 @@ export function extractMarkdownTasks(
   const tasks: MarkdownTask[] = [];
 
   for (const page of pages) {
-    const { body } = parseFrontmatter(page.content);
-    const lines = body.split(/\r?\n/);
+    if (!page.content) continue;
+    const lines = page.content.split(/\r?\n/);
+    let inFrontmatter = false;
 
     lines.forEach((line, lineIndex) => {
+      const trimmed = line.trim();
+      if (lineIndex === 0 && trimmed === '---') {
+        inFrontmatter = true;
+        return;
+      }
+      if (inFrontmatter) {
+        if (trimmed === '---') {
+          inFrontmatter = false;
+        }
+        return;
+      }
+
       const taskMatch = line.match(/^\s*[-*+]\s*\[([ xX])\]\s*(.*)$/);
       if (taskMatch) {
         const completed = taskMatch[1].toLowerCase() === 'x';
@@ -264,7 +277,7 @@ export function extractMarkdownTasks(
         let priority: 'low' | 'medium' | 'high' | undefined;
         let dueDate: string | undefined;
 
-        // Parse due date like @due(2026-09-01) or #due/2026-09-01
+        // Parse due date like @due(2026-09-01) or #due:2026-09-01
         const dueMatch = text.match(/@due\(([^)]+)\)|#due:([^\s]+)/i);
         if (dueMatch) {
           dueDate = dueMatch[1] || dueMatch[2];
@@ -299,7 +312,7 @@ export function extractMarkdownTasks(
 }
 
 /**
- * Toggles a task status inside a page's markdown content
+ * Toggles a task status inside a page's markdown content at exact lineIndex
  */
 export function toggleMarkdownTask(content: string, lineIndex: number): string {
   const lines = content.split(/\r?\n/);
@@ -308,7 +321,7 @@ export function toggleMarkdownTask(content: string, lineIndex: number): string {
   const targetLine = lines[lineIndex];
   const toggledLine = targetLine.replace(
     /^(\s*[-*+]\s*\[)([ xX])(\]\s*.*)$/,
-    (_m, p1, p2, p3) => `${p1}${p2.trim() === 'x' || p2.trim() === 'X' ? ' ' : 'x'}${p3}`
+    (_m, p1, p2, p3) => `${p1}${p2.trim().toLowerCase() === 'x' ? ' ' : 'x'}${p3}`
   );
 
   lines[lineIndex] = toggledLine;

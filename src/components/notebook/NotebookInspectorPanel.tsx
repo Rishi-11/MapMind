@@ -9,6 +9,8 @@ import {
   Send,
   Bot,
   ArrowUpRight,
+  PanelRightClose,
+  PanelRightOpen,
 } from 'lucide-react';
 import { Page, BacklinkItem, UnlinkedMentionItem } from '@/types/notebook';
 import { AiConnectionSuggestion, AiConnectionMode, KnowledgeAssistantMessage } from '@/types/ai';
@@ -29,9 +31,11 @@ interface NotebookInspectorPanelProps {
   onNavigateToPage: (pageTitle: string) => void;
   notebookMap: Map<string, string>;
   sectionMap: Map<string, string>;
+  isCollapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
-type InspectorTab = 'links' | 'ai' | 'chat' | 'outline';
+type InspectorTab = 'ai' | 'links' | 'chat' | 'outline';
 
 export const NotebookInspectorPanel: React.FC<NotebookInspectorPanelProps> = ({
   page,
@@ -46,6 +50,8 @@ export const NotebookInspectorPanel: React.FC<NotebookInspectorPanelProps> = ({
   onConvertMentionToLink,
   onNavigateToPage,
   notebookMap,
+  isCollapsed = false,
+  onToggleCollapse,
 }) => {
   const [activeTab, setActiveTab] = useState<InspectorTab>('ai');
 
@@ -102,45 +108,106 @@ export const NotebookInspectorPanel: React.FC<NotebookInspectorPanelProps> = ({
     }, 300);
   };
 
+  if (isCollapsed) {
+    return (
+      <aside className="w-11 h-full border-l border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-900/80 flex flex-col items-center py-3 gap-2 select-none shrink-0 transition-all">
+        <button
+          onClick={onToggleCollapse}
+          className="p-2 rounded-lg text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
+          title="Expand Knowledge Assistant (Ctrl+J)"
+        >
+          <PanelRightOpen className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+        </button>
+        <div className="w-6 h-px bg-slate-200 dark:bg-slate-800 my-1" />
+        <button
+          onClick={() => {
+            setActiveTab('ai');
+            onToggleCollapse?.();
+          }}
+          className="p-2 rounded-lg text-slate-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950/40 relative transition-colors"
+          title={`AI Suggestions (${aiSuggestions.length})`}
+        >
+          <Sparkles className="w-4 h-4 text-purple-500" />
+          {aiSuggestions.length > 0 && (
+            <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-purple-500" />
+          )}
+        </button>
+        <button
+          onClick={() => {
+            setActiveTab('links');
+            onToggleCollapse?.();
+          }}
+          className="p-2 rounded-lg text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 relative transition-colors"
+          title={`Backlinks (${backlinks.length})`}
+        >
+          <Link2 className="w-4 h-4 text-blue-500" />
+          {backlinks.length > 0 && (
+            <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-blue-500" />
+          )}
+        </button>
+        <button
+          onClick={() => {
+            setActiveTab('chat');
+            onToggleCollapse?.();
+          }}
+          className="p-2 rounded-lg text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors"
+          title="AI Assistant Chat"
+        >
+          <MessageSquare className="w-4 h-4 text-emerald-500" />
+        </button>
+        <button
+          onClick={() => {
+            setActiveTab('outline');
+            onToggleCollapse?.();
+          }}
+          className="p-2 rounded-lg text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
+          title="Document Outline"
+        >
+          <ListTree className="w-4 h-4 text-slate-400" />
+        </button>
+      </aside>
+    );
+  }
+
   return (
-    <aside className="w-72 sm:w-80 h-full border-l border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-900/80 flex flex-col shrink-0 select-none overflow-hidden">
+    <aside className="w-64 sm:w-72 md:w-80 lg:w-84 h-full border-l border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-900/80 flex flex-col shrink-0 select-none overflow-hidden transition-all">
       {/* Top Inspector Tabs */}
       <div className="h-11 border-b border-slate-200 dark:border-slate-800 px-2 flex items-center justify-between bg-slate-100/70 dark:bg-slate-900/60">
-        <div className="flex items-center gap-1 w-full">
+        <div className="flex items-center gap-1 flex-1 min-w-0 mr-1">
           <button
             onClick={() => setActiveTab('ai')}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all ${
+            className={`flex-1 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all truncate ${
               activeTab === 'ai'
                 ? 'bg-white dark:bg-slate-800 text-purple-700 dark:text-purple-300 shadow-xs'
                 : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
             }`}
           >
-            <Sparkles className="w-3.5 h-3.5 text-purple-500" />
-            <span>AI ({aiSuggestions.length})</span>
+            <Sparkles className="w-3.5 h-3.5 text-purple-500 shrink-0" />
+            <span className="truncate">AI ({aiSuggestions.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('links')}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all ${
+            className={`flex-1 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all truncate ${
               activeTab === 'links'
                 ? 'bg-white dark:bg-slate-800 text-purple-700 dark:text-purple-300 shadow-xs'
                 : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
             }`}
           >
-            <Link2 className="w-3.5 h-3.5 text-blue-500" />
-            <span>Links ({backlinks.length})</span>
+            <Link2 className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+            <span className="truncate">Links ({backlinks.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('chat')}
-            className={`flex-1 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all ${
+            className={`flex-1 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-all truncate ${
               activeTab === 'chat'
                 ? 'bg-white dark:bg-slate-800 text-purple-700 dark:text-purple-300 shadow-xs'
                 : 'text-slate-500 hover:text-slate-900 dark:hover:text-slate-200'
             }`}
           >
-            <MessageSquare className="w-3.5 h-3.5 text-emerald-500" />
-            <span>Ask</span>
+            <MessageSquare className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+            <span className="truncate">Ask</span>
           </button>
 
           <button
@@ -155,6 +222,16 @@ export const NotebookInspectorPanel: React.FC<NotebookInspectorPanelProps> = ({
             <ListTree className="w-3.5 h-3.5" />
           </button>
         </div>
+
+        {onToggleCollapse && (
+          <button
+            onClick={onToggleCollapse}
+            className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors shrink-0"
+            title="Collapse Inspector"
+          >
+            <PanelRightClose className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       {/* Tab Content */}

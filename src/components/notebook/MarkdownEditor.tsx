@@ -75,10 +75,20 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
 
   const { properties, body } = useMemo(() => parseFrontmatter(content), [content]);
 
-  // Debounced auto-save handler
+  // Debounced auto-save handler & Auto-Title sync from "# Heading"
   const handleContentChange = (newContent: string) => {
     setContent(newContent);
     setIsSaving(true);
+
+    // Auto-sync page title if the user writes or updates "# Heading" in the markdown
+    const firstHeadingMatch = newContent.match(/(?:^|\n)#\s+([^\n#]+)/);
+    if (firstHeadingMatch) {
+      const extractedTitle = firstHeadingMatch[1].trim();
+      if (extractedTitle && extractedTitle !== title) {
+        setTitle(extractedTitle);
+        onUpdateTitle(page.id, extractedTitle);
+      }
+    }
 
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
@@ -112,6 +122,13 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   const handleTitleChange = (newTitle: string) => {
     setTitle(newTitle);
     onUpdateTitle(page.id, newTitle);
+
+    // If note starts with a top level heading # OldTitle, keep markdown heading in sync
+    if (content.match(/^#\s+[^\n]+/)) {
+      const updated = content.replace(/^#\s+[^\n]+/, `# ${newTitle}`);
+      setContent(updated);
+      onUpdateContent(page.id, updated);
+    }
   };
 
   const handleTitleBlur = () => {
@@ -230,16 +247,29 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   }, [body]);
 
   // Render Rich Markdown Preview
-  const renderMarkdown = (markdownBody: string) => {
-    const lines = markdownBody.split(/\r?\n/);
+  const renderMarkdown = (fullMarkdown: string) => {
+    const lines = fullMarkdown.split(/\r?\n/);
     const elements: React.ReactNode[] = [];
     let inCodeBlock = false;
     let codeLanguage = '';
     let codeContent: string[] = [];
     let codeBlockIndex = 0;
+    let inFrontmatter = false;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
+
+      // Skip YAML frontmatter header block in preview
+      if (i === 0 && line.trim() === '---') {
+        inFrontmatter = true;
+        continue;
+      }
+      if (inFrontmatter) {
+        if (line.trim() === '---') {
+          inFrontmatter = false;
+        }
+        continue;
+      }
 
       // Code Block Start/End
       if (line.startsWith('```')) {
@@ -491,84 +521,84 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   return (
     <div className="flex-1 h-full flex flex-col bg-white dark:bg-slate-950 overflow-hidden relative">
       {/* Top Editor Toolbar */}
-      <div className="h-11 border-b border-slate-200 dark:border-slate-800 px-4 flex items-center justify-between bg-slate-50/70 dark:bg-slate-900/60 shrink-0 select-none">
+      <div className="h-10 border-b border-slate-100 dark:border-slate-800/60 px-3 sm:px-4 flex items-center justify-between bg-white/60 dark:bg-slate-950/60 backdrop-blur-xs shrink-0 select-none">
         {/* Formatting Actions */}
-        <div className="flex items-center gap-1 overflow-x-auto custom-scrollbar py-1">
+        <div className="flex items-center gap-0.5 overflow-x-auto custom-scrollbar py-0.5">
           <button
             onClick={() => applyFormatting('**', '**')}
-            className="p-1.5 rounded hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400"
+            className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
             title="Bold (Ctrl+B)"
           >
             <Bold className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => applyFormatting('*', '*')}
-            className="p-1.5 rounded hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400"
+            className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
             title="Italic (Ctrl+I)"
           >
             <Italic className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => applyFormatting('~~', '~~')}
-            className="p-1.5 rounded hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400"
+            className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
             title="Strikethrough"
           >
             <Strikethrough className="w-3.5 h-3.5" />
           </button>
-          <div className="w-px h-4 bg-slate-300 dark:bg-slate-700 mx-1" />
+          <div className="w-px h-3 bg-slate-200 dark:bg-slate-800 mx-0.5" />
           <button
             onClick={() => applyFormatting('# ')}
-            className="p-1.5 rounded hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-xs"
+            className="px-1.5 py-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 font-bold text-xs transition-colors"
             title="Heading 1"
           >
             H1
           </button>
           <button
             onClick={() => applyFormatting('## ')}
-            className="p-1.5 rounded hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-xs"
+            className="px-1.5 py-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 font-bold text-xs transition-colors"
             title="Heading 2"
           >
             H2
           </button>
           <button
             onClick={() => applyFormatting('### ')}
-            className="p-1.5 rounded hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-xs"
+            className="px-1.5 py-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 font-bold text-xs transition-colors"
             title="Heading 3"
           >
             H3
           </button>
-          <div className="w-px h-4 bg-slate-300 dark:bg-slate-700 mx-1" />
+          <div className="w-px h-3 bg-slate-200 dark:bg-slate-800 mx-0.5" />
           <button
             onClick={() => applyFormatting('- [ ] ')}
-            className="p-1.5 rounded hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400"
+            className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
             title="Checklist Task"
           >
             <CheckSquare className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => applyFormatting('- ')}
-            className="p-1.5 rounded hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400"
+            className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
             title="Bulleted List"
           >
             <List className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => applyFormatting('`', '`')}
-            className="p-1.5 rounded hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400"
+            className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
             title="Inline Code"
           >
             <Code className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => applyFormatting('[[', ']]')}
-            className="p-1.5 rounded hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400"
+            className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
             title="Wiki Link [[...]]"
           >
             <LinkIcon className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => applyFormatting('> [!NOTE]\n> ')}
-            className="p-1.5 rounded hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400"
+            className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
             title="Callout Admonition"
           >
             <Quote className="w-3.5 h-3.5" />
@@ -576,63 +606,63 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
         </div>
 
         {/* Right Tools: View Mode Switcher + Mind Map Generator Action */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={() => onOpenMindMapForPage(page)}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-xs hover:from-purple-700 hover:to-indigo-700 transition-all"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white shadow-xs transition-all"
             title="Visualize this Note as an Interactive Mind Map"
           >
             <BrainCircuit className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Open as Mind Map</span>
+            <span className="hidden sm:inline">Open Mind Map</span>
           </button>
 
           <button
             onClick={() => onGenerateStudyDeck(page)}
-            className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-medium text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/50 hover:bg-purple-100 border border-purple-200 dark:border-purple-800"
+            className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950/40 transition-colors"
             title="Study this Note (Flashcards & Quiz)"
           >
-            <Sparkles className="w-3.5 h-3.5" />
+            <Sparkles className="w-3.5 h-3.5 text-purple-500" />
             <span className="hidden md:inline">Study</span>
           </button>
 
-          <div className="w-px h-4 bg-slate-300 dark:bg-slate-700 mx-0.5" />
+          <div className="w-px h-3.5 bg-slate-200 dark:bg-slate-800 mx-0.5" />
 
           {/* View Mode Buttons */}
-          <div className="flex items-center bg-slate-200/80 dark:bg-slate-800 p-0.5 rounded-lg">
+          <div className="flex items-center bg-slate-100/70 dark:bg-slate-800/60 p-0.5 rounded-lg">
             <button
               onClick={() => setViewMode('split')}
-              className={`px-2 py-1 rounded text-xs font-semibold flex items-center gap-1 transition-all ${
+              className={`px-2 py-0.5 rounded-md text-xs font-medium flex items-center gap-1 transition-all ${
                 viewMode === 'split'
-                  ? 'bg-white dark:bg-slate-700 text-purple-600 shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                  ? 'bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-300 shadow-xs font-semibold'
+                  : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100'
               }`}
               title="Split View (Editor + Live Preview)"
             >
-              <Columns className="w-3.5 h-3.5" />
+              <Columns className="w-3 h-3" />
               <span className="hidden sm:inline">Split</span>
             </button>
             <button
               onClick={() => setViewMode('preview')}
-              className={`px-2 py-1 rounded text-xs font-semibold flex items-center gap-1 transition-all ${
+              className={`px-2 py-0.5 rounded-md text-xs font-medium flex items-center gap-1 transition-all ${
                 viewMode === 'preview'
-                  ? 'bg-white dark:bg-slate-700 text-purple-600 shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                  ? 'bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-300 shadow-xs font-semibold'
+                  : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100'
               }`}
               title="Live Preview"
             >
-              <Eye className="w-3.5 h-3.5" />
+              <Eye className="w-3 h-3" />
               <span className="hidden sm:inline">Preview</span>
             </button>
             <button
               onClick={() => setViewMode('source')}
-              className={`px-2 py-1 rounded text-xs font-semibold flex items-center gap-1 transition-all ${
+              className={`px-2 py-0.5 rounded-md text-xs font-medium flex items-center gap-1 transition-all ${
                 viewMode === 'source'
-                  ? 'bg-white dark:bg-slate-700 text-purple-600 shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
+                  ? 'bg-white dark:bg-slate-700 text-purple-600 dark:text-purple-300 shadow-xs font-semibold'
+                  : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100'
               }`}
               title="Source Markdown"
             >
-              <Code2 className="w-3.5 h-3.5" />
+              <Code2 className="w-3 h-3" />
               <span className="hidden sm:inline">Source</span>
             </button>
           </div>
@@ -691,22 +721,24 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       <div className="flex-1 overflow-hidden relative flex">
         {/* Editor (Shown in 'source' and 'split' modes) */}
         {(viewMode === 'source' || viewMode === 'split') && (
-          <div className={`h-full overflow-y-auto ${viewMode === 'split' ? 'w-1/2 border-r border-slate-200 dark:border-slate-800' : 'w-full'}`}>
+          <div className={`h-full overflow-y-auto ${viewMode === 'split' ? 'w-1/2 border-r border-slate-200/80 dark:border-slate-800/80' : 'w-full'}`}>
             <textarea
               ref={textareaRef}
               value={content}
               onChange={(e) => handleContentChange(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Write your markdown knowledge notes here..."
-              className="w-full h-full p-6 text-xs sm:text-sm font-mono leading-relaxed bg-transparent text-slate-800 dark:text-slate-100 resize-none focus:outline-none custom-scrollbar"
+              className={`w-full h-full p-4 sm:p-6 lg:p-8 text-xs sm:text-sm font-mono leading-relaxed bg-transparent text-slate-800 dark:text-slate-100 resize-none focus:outline-none custom-scrollbar ${
+                viewMode === 'source' ? 'max-w-4xl mx-auto block' : ''
+              }`}
             />
           </div>
         )}
 
         {/* Live Preview (Shown in 'preview' and 'split' modes) */}
         {(viewMode === 'preview' || viewMode === 'split') && (
-          <div className={`h-full overflow-y-auto p-6 sm:p-8 custom-scrollbar ${viewMode === 'split' ? 'w-1/2 bg-slate-50/50 dark:bg-slate-900/30' : 'w-full max-w-4xl mx-auto'}`}>
-            {renderMarkdown(body)}
+          <div className={`h-full overflow-y-auto p-4 sm:p-6 lg:p-8 custom-scrollbar ${viewMode === 'split' ? 'w-1/2 bg-slate-50/40 dark:bg-slate-900/20' : 'w-full max-w-4xl mx-auto'}`}>
+            {renderMarkdown(content)}
           </div>
         )}
 

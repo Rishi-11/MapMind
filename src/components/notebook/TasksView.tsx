@@ -36,6 +36,13 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const [newTaskPriority, setNewTaskPriority] = useState<'low' | 'medium' | 'high' | undefined>(undefined);
   const [newTaskDueDate, setNewTaskDueDate] = useState('');
 
+  // Keep target page valid when pages update
+  React.useEffect(() => {
+    if (!allPages.some((p) => p.id === newTaskPageId) && allPages.length > 0) {
+      setNewTaskPageId(allPages[0].id);
+    }
+  }, [allPages, newTaskPageId]);
+
   // Extract all tasks across all pages
   const allTasks = useMemo(() => {
     return extractMarkdownTasks(allPages, notebookMap, sectionMap);

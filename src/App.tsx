@@ -31,6 +31,8 @@ import {
   loadWorkspace,
   saveWorkspace,
   exportWorkspaceAsJson,
+  saveVaultToFileSystem,
+  openVaultFromFileSystem,
   exportAllVaultsBackupBundle,
   wipeAllLocalDeviceData,
   listAllVaults,
@@ -137,7 +139,12 @@ export function AppContent() {
   const [isVaultManagerOpen, setIsVaultManagerOpen] = useState(false);
   const [isAutoSaving, setIsAutoSaving] = useState(false);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    return typeof window !== 'undefined' && window.innerWidth < 960;
+  });
+  const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(() => {
+    return typeof window !== 'undefined' && window.innerWidth < 1280;
+  });
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
   // MapMind Canvas Graph State
@@ -216,6 +223,32 @@ export function AppContent() {
     setWorkspace(newV);
     showNotification(`Created new vault "${name}"`, 'success');
     refreshVaultList();
+  }, [showNotification, refreshVaultList]);
+
+  // Modern File System Access API: Native Disk Save (Ctrl+S) & Direct Sync
+  const handleSaveCurrentVault = useCallback(async (forcePrompt = false) => {
+    if (!workspace) return;
+    const res = await saveVaultToFileSystem(workspace, forcePrompt);
+    if (res.success && res.fileName) {
+      if (res.fallback) {
+        showNotification(`Exported backup for "${workspace.name}"`, 'success');
+      } else {
+        showNotification(`Saved to "${res.fileName}" (Direct Disk Sync)`, 'success');
+      }
+    }
+  }, [workspace, showNotification]);
+
+  const handleOpenLocalVaultFile = useCallback(async () => {
+    try {
+      const res = await openVaultFromFileSystem();
+      if (res) {
+        setWorkspace(res.workspace);
+        showNotification(`Opened & synced with "${res.fileName}"!`, 'success');
+        refreshVaultList();
+      }
+    } catch (err: any) {
+      showNotification(err.message || 'Failed to open vault file.', 'error');
+    }
   }, [showNotification, refreshVaultList]);
 
   const handleExportCurrentVault = useCallback(() => {
@@ -602,6 +635,105 @@ export function AppContent() {
     [workspace, persistWorkspace, showNotification]
   );
 
+  // Rename Handlers
+  const handleRenameNotebook = useCallback(
+    (notebookId: string, newName: string) => {
+      if (!workspace) return;
+      const updated = workspace.notebooks.map((nb) =>
+        nb.id === notebookId ? { ...nb, name: newName, updatedAt: new Date().toISOString() } : nb
+      );
+      persistWorkspace({ ...workspace, notebooks: updated });
+      showNotification(`Renamed notebook to "${newName}"`, 'info');
+    },
+    [workspace, persistWorkspace, showNotification]
+  );
+
+  const handleRenameSection = useCallback(
+    (notebookId: string, sectionId: string, newName: string) => {
+      if (!workspace) return;
+      const updated = workspace.notebooks.map((nb) => {
+        if (nb.id !== notebookId) return nb;
+        return {
+          ...nb,
+          sections: nb.sections.map((sec) =>
+            sec.id === sectionId ? { ...sec, name: newName, updatedAt: new Date().toISOString() } : sec
+          ),
+        };
+      });
+      persistWorkspace({ ...workspace, notebooks: updated });
+      showNotification(`Renamed section to "${newName}"`, 'info');
+    },
+    [workspace, persistWorkspace, showNotification]
+  );
+
+  const handleRenamePage = useCallback(
+    (pageId: string, newTitle: string) => {
+      handleUpdatePageTitle(pageId, newTitle);
+      showNotification(`Renamed note to "${newTitle}"`, 'info');
+    },
+    [handleUpdatePageTitle, showNotification]
+  );
+
+  // Reorder Handlers (Move Up / Move Down)
+  const handleReorderNotebooks = useCallback(
+    (notebookId: string, direction: 'up' | 'down') => {
+      if (!workspace) return;
+      const list = [...workspace.notebooks];
+      const idx = list.findIndex((n) => n.id === notebookId);
+      if (idx === -1) return;
+      const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= list.length) return;
+      const temp = list[idx];
+      list[idx] = list[targetIdx];
+      list[targetIdx] = temp;
+      persistWorkspace({ ...workspace, notebooks: list });
+    },
+    [workspace, persistWorkspace]
+  );
+
+  const handleReorderSections = useCallback(
+    (notebookId: string, sectionId: string, direction: 'up' | 'down') => {
+      if (!workspace) return;
+      const updated = workspace.notebooks.map((nb) => {
+        if (nb.id !== notebookId) return nb;
+        const sections = [...nb.sections];
+        const idx = sections.findIndex((s) => s.id === sectionId);
+        if (idx === -1) return nb;
+        const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+        if (targetIdx < 0 || targetIdx >= sections.length) return nb;
+        const temp = sections[idx];
+        sections[idx] = sections[targetIdx];
+        sections[targetIdx] = temp;
+        return { ...nb, sections };
+      });
+      persistWorkspace({ ...workspace, notebooks: updated });
+    },
+    [workspace, persistWorkspace]
+  );
+
+  const handleReorderPages = useCallback(
+    (sectionId: string, pageId: string, direction: 'up' | 'down') => {
+      if (!workspace) return;
+      const updated = workspace.notebooks.map((nb) => ({
+        ...nb,
+        sections: nb.sections.map((sec) => {
+          if (sec.id !== sectionId) return sec;
+          const pages = [...sec.pages];
+          const idx = pages.findIndex((p) => p.id === pageId);
+          if (idx === -1) return sec;
+          const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+          if (targetIdx < 0 || targetIdx >= pages.length) return sec;
+          const temp = pages[idx];
+          pages[idx] = pages[targetIdx];
+          pages[targetIdx] = temp;
+          return { ...sec, pages };
+        }),
+      }));
+      persistWorkspace({ ...workspace, notebooks: updated });
+    },
+    [workspace, persistWorkspace]
+  );
+
   // Navigate to page by title (from WikiLinks, Backlinks, etc.), auto-creating note if it does not exist
   const handleNavigateToPage = useCallback(
     (pageTitle: string) => {
@@ -985,17 +1117,17 @@ export function AppContent() {
         return;
       }
 
-      // Ctrl+S -> Save / Export Vault JSON (Override browser save page)
+      // Ctrl+S -> Save / Sync to Local File (Direct Disk Write, Shift for Save As)
       if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        handleExportCurrentVault();
+        handleSaveCurrentVault(e.shiftKey);
         return;
       }
 
-      // Ctrl+O -> Open / Import Vault JSON
+      // Ctrl+O -> Open Local Vault File from Disk
       if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'o') {
         e.preventDefault();
-        setIsVaultManagerOpen(true);
+        handleOpenLocalVaultFile();
         return;
       }
 
@@ -1003,6 +1135,13 @@ export function AppContent() {
       if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'd') {
         e.preventDefault();
         handleOpenDailyNote();
+        return;
+      }
+
+      // Ctrl+J -> Toggle Knowledge Inspector Panel
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'j') {
+        e.preventDefault();
+        setIsInspectorCollapsed((prev) => !prev);
         return;
       }
 
@@ -1019,7 +1158,7 @@ export function AppContent() {
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [handleExportCurrentVault, handleOpenDailyNote]);
+  }, [handleSaveCurrentVault, handleOpenLocalVaultFile, handleOpenDailyNote]);
 
   if (!workspace) {
     return (
@@ -1053,6 +1192,8 @@ export function AppContent() {
           setSettings((s) => ({ ...s, theme: s.theme === 'dark' ? 'light' : 'dark' }))
         }
         aiMode={workspace.settings.aiConnectionMode}
+        isInspectorOpen={!isInspectorCollapsed}
+        onToggleInspector={() => setIsInspectorCollapsed((prev) => !prev)}
       />
 
       {/* Main Workspace Body */}
@@ -1074,6 +1215,12 @@ export function AppContent() {
               onDeletePage={handleDeletePage}
               onDeleteNotebook={handleDeleteNotebook}
               onDeleteSection={handleDeleteSection}
+              onRenameNotebook={handleRenameNotebook}
+              onRenameSection={handleRenameSection}
+              onRenamePage={handleRenamePage}
+              onReorderNotebooks={handleReorderNotebooks}
+              onReorderSections={handleReorderSections}
+              onReorderPages={handleReorderPages}
               onToggleFavorite={handleToggleFavorite}
               onOpenDailyNote={handleOpenDailyNote}
               onOpenTasksView={() => setViewMode('tasks')}
@@ -1129,6 +1276,8 @@ export function AppContent() {
                 onNavigateToPage={handleNavigateToPage}
                 notebookMap={notebookMap}
                 sectionMap={sectionMap}
+                isCollapsed={isInspectorCollapsed}
+                onToggleCollapse={() => setIsInspectorCollapsed((prev) => !prev)}
               />
             )}
           </div>
@@ -1412,7 +1561,7 @@ export function AppContent() {
           setViewMode('editor');
         }}
         onOpenDailyNote={handleOpenDailyNote}
-        onExportVault={() => exportWorkspaceAsJson(workspace)}
+        onExportVault={() => handleSaveCurrentVault(false)}
         onOpenVaultManager={() => setIsVaultManagerOpen(true)}
         onExportAllVaults={handleExportAllVaultsBundle}
         onWipeDeviceData={handleWipeDeviceData}
@@ -1534,7 +1683,9 @@ export function AppContent() {
         vaultList={vaultList}
         onSwitchVault={handleSwitchVault}
         onCreateVault={handleCreateVault}
-        onExportCurrentVault={handleExportCurrentVault}
+        onExportCurrentVault={() => handleSaveCurrentVault(false)}
+        onSaveVaultAs={() => handleSaveCurrentVault(true)}
+        onOpenLocalVaultFile={handleOpenLocalVaultFile}
         onExportAllVaultsBundle={handleExportAllVaultsBundle}
         onImportVaultFile={handleImportVaultFile}
         onDeleteVault={handleDeleteVault}

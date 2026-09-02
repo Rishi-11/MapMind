@@ -26,6 +26,8 @@ interface VaultManagerModalProps {
   onSwitchVault: (vaultId: string) => void;
   onCreateVault: (name: string, template: 'empty' | 'guide') => void;
   onExportCurrentVault: () => void;
+  onSaveVaultAs?: () => void;
+  onOpenLocalVaultFile?: () => void;
   onExportAllVaultsBundle: () => void;
   onImportVaultFile: (file: File) => void;
   onDeleteVault: (vaultId: string) => void;
@@ -40,6 +42,8 @@ export const VaultManagerModal: React.FC<VaultManagerModalProps> = ({
   onSwitchVault,
   onCreateVault,
   onExportCurrentVault,
+  onSaveVaultAs,
+  onOpenLocalVaultFile,
   onExportAllVaultsBundle,
   onImportVaultFile,
   onDeleteVault,
@@ -231,12 +235,23 @@ export const VaultManagerModal: React.FC<VaultManagerModalProps> = ({
                 <div className="flex items-center gap-2">
                   <button
                     onClick={onExportCurrentVault}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors"
-                    title="Save current active vault as a JSON backup file (Ctrl+S)"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white shadow-xs transition-colors"
+                    title="Save current active vault directly to local disk (Ctrl+S)"
                   >
-                    <Download className="w-3.5 h-3.5 text-purple-500" />
-                    <span>Export Active Vault</span>
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Save to Disk (Ctrl+S)</span>
                   </button>
+
+                  {onSaveVaultAs && (
+                    <button
+                      onClick={onSaveVaultAs}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 transition-colors"
+                      title="Save current active vault to a new local file location (Ctrl+Shift+S)"
+                    >
+                      <HardDrive className="w-3.5 h-3.5 text-purple-500" />
+                      <span>Save As...</span>
+                    </button>
+                  )}
 
                   <button
                     onClick={onExportAllVaultsBundle}
@@ -248,7 +263,17 @@ export const VaultManagerModal: React.FC<VaultManagerModalProps> = ({
                   </button>
                 </div>
 
-                <div>
+                <div className="flex items-center gap-2">
+                  {onOpenLocalVaultFile && (
+                    <button
+                      onClick={onOpenLocalVaultFile}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 transition-colors"
+                      title="Open and sync a vault file directly from disk (Ctrl+O)"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Open Vault File (Ctrl+O)</span>
+                    </button>
+                  )}
                   <input
                     type="file"
                     ref={fileInputRef}
@@ -256,14 +281,6 @@ export const VaultManagerModal: React.FC<VaultManagerModalProps> = ({
                     accept=".json"
                     className="hidden"
                   />
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 transition-colors"
-                    title="Import a vault from a JSON file (Ctrl+O)"
-                  >
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>Import JSON Vault</span>
-                  </button>
                 </div>
               </div>
             </div>

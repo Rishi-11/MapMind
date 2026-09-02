@@ -679,6 +679,118 @@ export async function deleteVaultById(vaultId: string): Promise<void> {
 }
 
 /**
+ * In-memory FileSystemFileHandle cache mapped by workspace ID
+ */
+const fileHandleMap = new Map<string, FileSystemFileHandle>();
+
+/**
+ * Check if modern File System Access API is supported
+ */
+export function isFileSystemAccessSupported(): boolean {
+  return typeof window !== 'undefined' && 'showSaveFilePicker' in window;
+}
+
+/**
+ * Get active connected file handle name for a vault (if synced to disk)
+ */
+export function getConnectedFileName(vaultId: string): string | null {
+  const handle = fileHandleMap.get(vaultId);
+  return handle ? handle.name : null;
+}
+
+/**
+ * Save vault directly to local disk using File System Access API.
+ * - On first save (or if forcePrompt is true), opens the native OS folder/file picker.
+ * - On subsequent saves, directly writes to the SAME file without downloading duplicate files!
+ */
+export async function saveVaultToFileSystem(
+  workspace: Workspace,
+  forcePrompt = false
+): Promise<{ success: boolean; fileName?: string; fallback?: boolean }> {
+  const jsonStr = JSON.stringify(workspace, null, 2);
+
+  // Fallback for browsers without File System Access API
+  if (!isFileSystemAccessSupported()) {
+    exportWorkspaceAsJson(workspace);
+    return { success: true, fileName: `${workspace.name}.json`, fallback: true };
+  }
+
+  let handle = fileHandleMap.get(workspace.id);
+
+  try {
+    if (!handle || forcePrompt) {
+      const safeName = `${workspace.name.toLowerCase().replace(/[^a-z0-9_-]/g, '-')}.mapmind.json`;
+      handle = await (window as any).showSaveFilePicker({
+        suggestedName: safeName,
+        types: [
+          {
+            description: 'MapMind Knowledge Vault (*.mapmind.json, *.json)',
+            accept: {
+              'application/json': ['.json', '.mapmind.json'],
+            },
+          },
+        ],
+      });
+
+      if (handle) {
+        fileHandleMap.set(workspace.id, handle);
+      }
+    }
+
+    if (!handle) return { success: false };
+
+    const writable = await (handle as any).createWritable();
+    await writable.write(jsonStr);
+    await writable.close();
+
+    return { success: true, fileName: handle.name, fallback: false };
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      // User dismissed picker dialog
+      return { success: false };
+    }
+    console.warn('Native File System save failed, falling back to download:', err);
+    exportWorkspaceAsJson(workspace);
+    return { success: true, fileName: `${workspace.name}.json`, fallback: true };
+  }
+}
+
+/**
+ * Open vault from local disk using native File System Access API (showOpenFilePicker).
+ * Retains the file handle so future Ctrl+S updates that exact file!
+ */
+export async function openVaultFromFileSystem(): Promise<{ workspace: Workspace; fileName: string } | null> {
+  if (!isFileSystemAccessSupported()) {
+    return null;
+  }
+
+  try {
+    const [handle] = await (window as any).showOpenFilePicker({
+      types: [
+        {
+          description: 'MapMind Vault JSON (*.json, *.mapmind.json)',
+          accept: {
+            'application/json': ['.json', '.mapmind.json'],
+          },
+        },
+      ],
+      multiple: false,
+    });
+
+    if (!handle) return null;
+
+    const file = await handle.getFile();
+    const imported = await importVaultFromJsonFile(file);
+    fileHandleMap.set(imported.id, handle);
+
+    return { workspace: imported, fileName: handle.name };
+  } catch (err: any) {
+    if (err.name === 'AbortError') return null;
+    throw err;
+  }
+}
+
+/**
  * Export a single vault as formatted JSON file
  */
 export function exportWorkspaceAsJson(workspace: Workspace): void {
