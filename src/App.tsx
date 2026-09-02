@@ -40,6 +40,7 @@ import {
   createNewVault,
   deleteVaultById,
   importVaultFromJsonFile,
+  reconcileWorkspacePages,
   ONBOARDING_GUIDE_VAULT,
   INITIAL_STARTER_WORKSPACE,
   VaultMetadata,
@@ -48,6 +49,26 @@ import { VaultManagerModal } from '@/components/notebook/VaultManagerModal';
 import { buildBacklinkIndex, detectUnlinkedMentions, convertMentionToWikiLink } from '@/lib/notebook/links';
 import { discoverAiSuggestions } from '@/lib/notebook/knowledgeAiEngine';
 import { markdownToMindMap, mindMapToMarkdown } from '@/lib/notebook/mindmapBridge';
+
+// ☁️ Auth, Zero-Knowledge Crypto & Multi-Device Sync
+import { AuthUser, SyncStatusInfo, ConflictRecord, SyncOperationType, SyncQueueItem } from '@/types/auth';
+import {
+  getStoredAuthSession,
+  enqueueSyncOperation,
+  getPendingSyncOperations,
+  removeProcessedSyncOps,
+  clearSyncQueue,
+} from '@/lib/sync/syncQueue';
+import { pushSyncOperations, fetchUserCloudChanges } from '@/lib/sync/googleSheetsSync';
+import { encryptData, decryptData, generateSecureId } from '@/lib/crypto/clientCrypto';
+import {
+  applyCloudVersionToWorkspace,
+  forceLocalVersionToCloud,
+  duplicateBothVersionsInWorkspace,
+} from '@/lib/sync/conflictManager';
+import { exportPlaintextBackupFile, parseAndMigrateBackup } from '@/lib/backup/backupService';
+import { CloudSyncModal } from '@/components/auth/CloudSyncModal';
+import { ConflictResolutionModal } from '@/components/sync/ConflictResolutionModal';
 
 // 🚀 Lazy-Loaded Heavy Modals
 const ExportMenu = lazy(() => import('@/components/ui/ExportMenu').then((m) => ({ default: m.ExportMenu })));
@@ -162,6 +183,19 @@ export function AppContent() {
   const [currentLayout, setCurrentLayout] = useState<LayoutDirection>('BALANCED_MINDMAP');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
+  // ☁️ Zero-Knowledge Cloud Sync & Authentication State
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [encryptionKey, setEncryptionKey] = useState<CryptoKey | null>(null);
+  const [authVerifier, setAuthVerifier] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatusInfo>({
+    state: 'local_saved',
+    pendingCount: 0,
+    lastSyncedAt: null,
+  });
+  const [conflicts, setConflicts] = useState<ConflictRecord[]>([]);
+  const [isCloudSyncModalOpen, setIsCloudSyncModalOpen] = useState(false);
+  const [isConflictModalOpen, setIsConflictModalOpen] = useState(false);
+
   const [settings, setSettings] = useState<CanvasSettings>({
     sketchMode: false,
     gridSnap: true,
@@ -186,6 +220,42 @@ export function AppContent() {
     setVaultList(list);
   }, []);
 
+  // Initialize stored auth session on startup
+  useEffect(() => {
+    async function initSession() {
+      try {
+        const session = await getStoredAuthSession();
+        if (session) {
+          setAuthUser(session);
+          const pending = await getPendingSyncOperations(session.userId);
+          setSyncStatus((s) => ({ ...s, pendingCount: pending.length }));
+        }
+      } catch (err) {
+        console.warn('Failed to load auth session:', err);
+      }
+    }
+    initSession();
+  }, []);
+
+  // Online / Offline Network Listeners
+  useEffect(() => {
+    const handleOnline = () => {
+      setSyncStatus((s) => ({ ...s, state: 'local_saved' }));
+      showNotification('🌐 Connection restored. Ready to sync.', 'info');
+    };
+    const handleOffline = () => {
+      setSyncStatus((s) => ({ ...s, state: 'offline_waiting' }));
+      showNotification('📶 Offline mode: all changes saved safely to IndexedDB.', 'info');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [showNotification]);
+
   // Load Workspace on Initial Mount
   useEffect(() => {
     loadWorkspace().then((ws) => {
@@ -207,6 +277,367 @@ export function AppContent() {
     }, 600);
   }, [refreshVaultList]);
 
+  // Debounced cloud sync queue per object
+  const cloudSyncTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+
+  // Helper to enqueue a client-side encrypted cloud sync operation
+  const queueCloudSyncOperation = useCallback(
+    (operation: SyncOperationType, objectId: string, payloadObj: any, baseVersion = 1) => {
+      if (!authUser || !encryptionKey) return;
+
+      const timerKey = `${operation}:${objectId}`;
+      const existingTimer = cloudSyncTimersRef.current.get(timerKey);
+      if (existingTimer) clearTimeout(existingTimer);
+
+      const timer = setTimeout(async () => {
+        try {
+          const encrypted = await encryptData(payloadObj, encryptionKey);
+          await enqueueSyncOperation({
+            userId: authUser.userId,
+            deviceId: authUser.deviceId,
+            operation,
+            objectId,
+            baseVersion,
+            timestamp: new Date().toISOString(),
+            encryptedPayload: JSON.stringify(encrypted),
+          });
+          const pending = await getPendingSyncOperations(authUser.userId);
+          setSyncStatus((s) => ({ ...s, pendingCount: pending.length, state: 'local_saved' }));
+        } catch (err) {
+          console.warn('Failed to queue encrypted cloud sync operation:', err);
+        } finally {
+          cloudSyncTimersRef.current.delete(timerKey);
+        }
+      }, operation.startsWith('UPDATE') ? 800 : 0);
+
+      cloudSyncTimersRef.current.set(timerKey, timer);
+    },
+    [authUser, encryptionKey]
+  );
+
+  // Perform full Cloud Sync (Push pending offline queue + Fetch cloud changes)
+  const handlePerformCloudSync = useCallback(async () => {
+    if (!authUser || !encryptionKey || !authVerifier) {
+      setIsCloudSyncModalOpen(true);
+      return;
+    }
+    if (!navigator.onLine) {
+      setSyncStatus((s) => ({ ...s, state: 'offline_waiting' }));
+      showNotification('Offline mode. Changes queued in IndexedDB.', 'info');
+      return;
+    }
+
+    setSyncStatus((s) => ({ ...s, state: 'syncing' }));
+
+    try {
+      // 1. Push pending local operations to Sheets
+      const pendingOps = await getPendingSyncOperations(authUser.userId);
+      if (pendingOps.length > 0) {
+        const pushRes = await pushSyncOperations(
+          authUser.appsScriptUrl,
+          authUser.userId,
+          authVerifier,
+          authUser.deviceId,
+          pendingOps
+        );
+
+        if (!pushRes.success) {
+          if (pushRes.error === 'UNAUTHORIZED') {
+            throw new Error('Account not found in this Google Sheet. Please click "Log Out" and Register your account on this sheet.');
+          }
+          throw new Error(pushRes.error || 'Failed to push operations to Google Sheets.');
+        }
+
+        if (pushRes.processedRequestIds && pushRes.processedRequestIds.length > 0) {
+          await removeProcessedSyncOps(pushRes.processedRequestIds);
+        }
+
+        if (pushRes.conflicts && pushRes.conflicts.length > 0) {
+          // Process conflicts
+          const parsedConflicts: ConflictRecord[] = [];
+          for (const c of pushRes.conflicts) {
+            try {
+              const cloudContent = await decryptData(JSON.parse(c.cloudEncryptedPayload), encryptionKey);
+              let localContent: any = null;
+              if (c.objectType === 'page') {
+                for (const nb of workspace.notebooks) {
+                  for (const sec of nb.sections) {
+                    const p = sec.pages.find((pg) => pg.id === c.objectId);
+                    if (p) {
+                      localContent = p;
+                      break;
+                    }
+                  }
+                }
+              }
+              parsedConflicts.push({
+                objectId: c.objectId,
+                objectType: c.objectType,
+                localVersion: c.localVersion,
+                cloudVersion: c.cloudVersion,
+                localContent,
+                cloudContent,
+                cloudTimestamp: c.cloudTimestamp,
+                localTimestamp: new Date().toISOString(),
+              });
+            } catch (decErr) {
+              console.warn('Failed to decrypt conflict payload:', decErr);
+            }
+          }
+          if (parsedConflicts.length > 0) {
+            setConflicts(parsedConflicts);
+            setSyncStatus((s) => ({ ...s, state: 'conflict' }));
+            setIsConflictModalOpen(true);
+            return;
+          }
+        }
+      }
+
+      // 2. Fetch changes from Google Sheets and decrypt
+      const cloudRes = await fetchUserCloudChanges(authUser.appsScriptUrl, authUser.userId, authVerifier);
+      if (!cloudRes.success) {
+        if (cloudRes.error === 'UNAUTHORIZED') {
+          throw new Error('Account not found in this Google Sheet. Please click "Log Out" and Register your account on this sheet.');
+        }
+        throw new Error(cloudRes.error || 'Failed to fetch cloud changes from Google Sheets.');
+      }
+        let hasNewData = false;
+        let updatedWorkspace = { ...workspace };
+
+        // Handle initial seed: If cloud is completely empty, push all local notebooks & pages to cloud
+        if (
+          cloudRes.notebooks.length === 0 &&
+          cloudRes.pages.length === 0 &&
+          updatedWorkspace.notebooks.length > 0
+        ) {
+          const initialOps: SyncQueueItem[] = [];
+          for (const nb of updatedWorkspace.notebooks) {
+            const encNb = await encryptData(nb, encryptionKey);
+            initialOps.push({
+              requestId: generateSecureId('req'),
+              userId: authUser.userId,
+              deviceId: authUser.deviceId,
+              operation: 'CREATE_NOTEBOOK',
+              objectId: nb.id,
+              baseVersion: 1,
+              timestamp: new Date().toISOString(),
+              encryptedPayload: JSON.stringify(encNb),
+              retries: 0,
+            });
+            for (const sec of nb.sections) {
+              for (const p of sec.pages) {
+                const encPage = await encryptData(p, encryptionKey);
+                initialOps.push({
+                  requestId: generateSecureId('req'),
+                  userId: authUser.userId,
+                  deviceId: authUser.deviceId,
+                  operation: 'CREATE_PAGE',
+                  objectId: p.id,
+                  baseVersion: 1,
+                  timestamp: new Date().toISOString(),
+                  encryptedPayload: JSON.stringify(encPage),
+                  retries: 0,
+                });
+              }
+            }
+          }
+
+          if (initialOps.length > 0) {
+            const seedRes = await pushSyncOperations(
+              authUser.appsScriptUrl,
+              authUser.userId,
+              authVerifier,
+              authUser.deviceId,
+              initialOps
+            );
+            if (seedRes.success && seedRes.processedRequestIds) {
+              await removeProcessedSyncOps(seedRes.processedRequestIds);
+            }
+          }
+        }
+
+        // Merge cloud notebooks
+        for (const cloudNb of cloudRes.notebooks) {
+          if (!cloudNb.deleted && cloudNb.encrypted_metadata) {
+            try {
+              const decryptedNb = await decryptData<Notebook>(
+                JSON.parse(cloudNb.encrypted_metadata),
+                encryptionKey
+              );
+              const idx = updatedWorkspace.notebooks.findIndex((n) => n.id === decryptedNb.id);
+              if (idx >= 0) {
+                if (new Date(decryptedNb.updatedAt).getTime() > new Date(updatedWorkspace.notebooks[idx].updatedAt).getTime()) {
+                  // Merge notebook metadata while preserving local pages if cloud sections lack them
+                  updatedWorkspace.notebooks[idx] = {
+                    ...decryptedNb,
+                    sections: decryptedNb.sections.map((cloudSec) => {
+                      const localSec = updatedWorkspace.notebooks[idx].sections.find((s) => s.id === cloudSec.id);
+                      return {
+                        ...cloudSec,
+                        pages: localSec?.pages || cloudSec.pages || [],
+                      };
+                    }),
+                  };
+                  hasNewData = true;
+                }
+              } else {
+                updatedWorkspace.notebooks.push(decryptedNb);
+                hasNewData = true;
+              }
+            } catch (nbErr) {
+              console.warn('Error decrypting cloud notebook:', nbErr);
+            }
+          }
+        }
+
+        // Merge cloud pages
+        for (const cloudPg of cloudRes.pages) {
+          if (!cloudPg.deleted && cloudPg.encrypted_content) {
+            try {
+              const decryptedPage = await decryptData<Page>(JSON.parse(cloudPg.encrypted_content), encryptionKey);
+              
+              // Find target notebook
+              let targetNb = updatedWorkspace.notebooks.find((n) => n.id === decryptedPage.notebookId);
+              if (!targetNb) {
+                // Look for notebook containing target sectionId
+                for (const nb of updatedWorkspace.notebooks) {
+                  if (nb.sections.some((s) => s.id === decryptedPage.sectionId)) {
+                    targetNb = nb;
+                    break;
+                  }
+                }
+              }
+              if (!targetNb) targetNb = updatedWorkspace.notebooks[0];
+              if (!targetNb) continue;
+
+              // Find target section
+              let targetSec = targetNb.sections.find((s) => s.id === decryptedPage.sectionId);
+              if (!targetSec) targetSec = targetNb.sections[0];
+              if (!targetSec) continue;
+
+              // Check if page exists anywhere in workspace
+              let existingPage: Page | null = null;
+              let existingSec: Section | null = null;
+              for (const nb of updatedWorkspace.notebooks) {
+                for (const sec of nb.sections) {
+                  const p = sec.pages.find((pg) => pg.id === decryptedPage.id);
+                  if (p) {
+                    existingPage = p;
+                    existingSec = sec;
+                    break;
+                  }
+                }
+              }
+
+              if (existingPage && existingSec) {
+                if (new Date(decryptedPage.updatedAt).getTime() >= new Date(existingPage.updatedAt).getTime()) {
+                  if (existingSec.id !== targetSec.id) {
+                    existingSec.pages = existingSec.pages.filter((p) => p.id !== decryptedPage.id);
+                    targetSec.pages.unshift(decryptedPage);
+                  } else {
+                    const pIdx = existingSec.pages.findIndex((p) => p.id === decryptedPage.id);
+                    if (pIdx >= 0) existingSec.pages[pIdx] = decryptedPage;
+                  }
+                  hasNewData = true;
+                }
+              } else {
+                targetSec.pages.unshift(decryptedPage);
+                hasNewData = true;
+              }
+            } catch (pErr) {
+              console.warn('Error decrypting cloud page:', pErr);
+            }
+          }
+        }
+
+        const reconciled = reconcileWorkspacePages(updatedWorkspace);
+        if (reconciled.changed || hasNewData) {
+          updatedWorkspace = reconciled.workspace;
+          setWorkspace(updatedWorkspace);
+          await saveWorkspace(updatedWorkspace);
+        }
+
+      const remainingPending = await getPendingSyncOperations(authUser.userId);
+      setSyncStatus({
+        state: 'cloud_saved',
+        pendingCount: remainingPending.length,
+        lastSyncedAt: new Date().toLocaleTimeString(),
+      });
+      showNotification('☁ Cloud sync completed successfully!', 'success');
+    } catch (err: any) {
+      console.warn('Cloud sync error:', err);
+      setSyncStatus((s) => ({
+        ...s,
+        state: navigator.onLine ? 'error' : 'offline_waiting',
+        errorMessage: err.message,
+      }));
+      showNotification(`Cloud sync failed: ${err.message}`, 'error');
+    }
+  }, [authUser, encryptionKey, authVerifier, workspace, showNotification]);
+
+  // Clear pending sync queue manually
+  const handleClearSyncQueue = useCallback(async () => {
+    if (!authUser) return;
+    await clearSyncQueue();
+    setSyncStatus((s) => ({ ...s, pendingCount: 0 }));
+    showNotification('Cleared pending sync queue.', 'info');
+  }, [authUser, showNotification]);
+
+  // Conflict Resolution Handlers
+  const handleResolveKeepLocal = useCallback(
+    async (conflict: ConflictRecord) => {
+      if (!authUser || !encryptionKey) return;
+      await forceLocalVersionToCloud(conflict, encryptionKey, authUser);
+      setConflicts((prev) => prev.filter((c) => c.objectId !== conflict.objectId));
+      if (conflicts.length <= 1) {
+        setIsConflictModalOpen(false);
+      }
+      showNotification('Retained local version and queued cloud update.', 'success');
+      handlePerformCloudSync();
+    },
+    [authUser, encryptionKey, conflicts.length, showNotification, handlePerformCloudSync]
+  );
+
+  const handleResolveKeepCloud = useCallback(
+    async (conflict: ConflictRecord) => {
+      const updated = applyCloudVersionToWorkspace(workspace, conflict);
+      setWorkspace(updated);
+      await saveWorkspace(updated);
+      setConflicts((prev) => prev.filter((c) => c.objectId !== conflict.objectId));
+      if (conflicts.length <= 1) {
+        setIsConflictModalOpen(false);
+      }
+      showNotification('Applied cloud version to local note.', 'success');
+    },
+    [workspace, conflicts.length, showNotification]
+  );
+
+  const handleResolveDuplicateBoth = useCallback(
+    async (conflict: ConflictRecord) => {
+      const updated = duplicateBothVersionsInWorkspace(workspace, conflict);
+      setWorkspace(updated);
+      await saveWorkspace(updated);
+      setConflicts((prev) => prev.filter((c) => c.objectId !== conflict.objectId));
+      if (conflicts.length <= 1) {
+        setIsConflictModalOpen(false);
+      }
+      showNotification('Created duplicate local copy and preserved cloud version.', 'success');
+    },
+    [workspace, conflicts.length, showNotification]
+  );
+
+  // Recovery from Plaintext Backup
+  const handleRecoverFromBackup = useCallback(
+    async (file: File, _newPassword: string) => {
+      const text = await file.text();
+      const imported = parseAndMigrateBackup(text);
+      setWorkspace(imported);
+      await saveWorkspace(imported);
+      showNotification('Backup successfully imported and restored!', 'success');
+    },
+    [showNotification]
+  );
+
   // Multi-Vault Management Actions
   const handleSwitchVault = useCallback(async (vaultId: string) => {
     const loaded = await loadVaultById(vaultId);
@@ -225,16 +656,19 @@ export function AppContent() {
     refreshVaultList();
   }, [showNotification, refreshVaultList]);
 
-  // Modern File System Access API: Native Disk Save (Ctrl+S) & Direct Sync
+  // Plaintext Local Backup & Native Disk Save (Ctrl+S)
   const handleSaveCurrentVault = useCallback(async (forcePrompt = false) => {
     if (!workspace) return;
     const res = await saveVaultToFileSystem(workspace, forcePrompt);
     if (res.success && res.fileName) {
       if (res.fallback) {
-        showNotification(`Exported backup for "${workspace.name}"`, 'success');
+        showNotification(`Plaintext backup saved for "${workspace.name}"`, 'success');
       } else {
-        showNotification(`Saved to "${res.fileName}" (Direct Disk Sync)`, 'success');
+        showNotification(`Saved to "${res.fileName}" (Plaintext Local Backup)`, 'success');
       }
+    } else {
+      exportPlaintextBackupFile(workspace);
+      showNotification(`Saved unencrypted backup for "${workspace.name}"`, 'success');
     }
   }, [workspace, showNotification]);
 
@@ -462,16 +896,38 @@ export function AppContent() {
     (notebookId?: string, sectionId?: string, title = 'Untitled Note') => {
       if (!workspace || workspace.notebooks.length === 0) return;
 
-      // 1. Resolve target notebook
-      const targetNbId = notebookId || workspace.activeNotebookId || workspace.notebooks[0]?.id;
-      const targetNb = workspace.notebooks.find((n) => n.id === targetNbId) || workspace.notebooks[0];
+      let targetNb: Notebook | undefined;
+      let targetSec: Section | undefined;
+
+      // 1. If explicit sectionId is passed, search across all notebooks
+      if (sectionId) {
+        for (const nb of workspace.notebooks) {
+          const sec = nb.sections.find((s) => s.id === sectionId);
+          if (sec) {
+            targetNb = nb;
+            targetSec = sec;
+            break;
+          }
+        }
+      }
+
+      // 2. If notebookId is provided or not resolved yet
+      if (!targetNb) {
+        const targetNbId = notebookId || workspace.activeNotebookId || workspace.notebooks[0]?.id;
+        targetNb = workspace.notebooks.find((n) => n.id === targetNbId) || workspace.notebooks[0];
+      }
+
       if (!targetNb) return;
 
-      // 2. Resolve target section within the target notebook
-      const targetSec =
-        (sectionId ? targetNb.sections.find((s) => s.id === sectionId) : null) ||
-        (workspace.activeSectionId ? targetNb.sections.find((s) => s.id === workspace.activeSectionId) : null) ||
-        targetNb.sections[0];
+      // 3. Resolve target section within notebook
+      if (!targetSec) {
+        if (workspace.activeSectionId) {
+          targetSec = targetNb.sections.find((s) => s.id === workspace.activeSectionId);
+        }
+        if (!targetSec) {
+          targetSec = targetNb.sections[0];
+        }
+      }
 
       const newPageId = `page-${Date.now()}`;
       const newSecId = targetSec ? targetSec.id : `sec-${Date.now()}`;
@@ -516,54 +972,77 @@ export function AppContent() {
         });
       }
 
-      persistWorkspace({
+      const rawWorkspace = {
         ...workspace,
         notebooks: updatedNotebooks,
         activeNotebookId: targetNb.id,
         activeSectionId: newSecId,
         activePageId: newPage.id,
-      });
+      };
+      const { workspace: cleanWorkspace } = reconcileWorkspacePages(rawWorkspace);
 
+      persistWorkspace(cleanWorkspace);
+
+      // ☁️ Queue Cloud Sync
+      queueCloudSyncOperation('CREATE_PAGE', newPage.id, newPage, 1);
+      showNotification(`Created note in ${targetSec?.name || 'notebook'}`, 'success');
       setViewMode('editor');
-      showNotification(`Created note "${title}"`, 'success');
     },
-    [workspace, persistWorkspace, showNotification]
+    [workspace, persistWorkspace, showNotification, queueCloudSyncOperation]
   );
 
   const handleUpdatePageContent = useCallback(
     (pageId: string, content: string) => {
       if (!workspace) return;
+      let targetPage: Page | null = null;
       const updatedNotebooks = workspace.notebooks.map((nb) => ({
         ...nb,
         sections: nb.sections.map((sec) => ({
           ...sec,
-          pages: sec.pages.map((p) =>
-            p.id === pageId ? { ...p, content, updatedAt: new Date().toISOString() } : p
-          ),
+          pages: sec.pages.map((p) => {
+            if (p.id === pageId) {
+              const updated = { ...p, content, updatedAt: new Date().toISOString() };
+              targetPage = updated;
+              return updated;
+            }
+            return p;
+          }),
         })),
       }));
 
       persistWorkspace({ ...workspace, notebooks: updatedNotebooks });
+      if (targetPage) {
+        queueCloudSyncOperation('UPDATE_PAGE', pageId, targetPage);
+      }
     },
-    [workspace, persistWorkspace]
+    [workspace, persistWorkspace, queueCloudSyncOperation]
   );
 
   const handleUpdatePageTitle = useCallback(
     (pageId: string, title: string) => {
       if (!workspace) return;
+      let targetPage: Page | null = null;
       const updatedNotebooks = workspace.notebooks.map((nb) => ({
         ...nb,
         sections: nb.sections.map((sec) => ({
           ...sec,
-          pages: sec.pages.map((p) =>
-            p.id === pageId ? { ...p, title, updatedAt: new Date().toISOString() } : p
-          ),
+          pages: sec.pages.map((p) => {
+            if (p.id === pageId) {
+              const updated = { ...p, title, updatedAt: new Date().toISOString() };
+              targetPage = updated;
+              return updated;
+            }
+            return p;
+          }),
         })),
       }));
 
       persistWorkspace({ ...workspace, notebooks: updatedNotebooks });
+      if (targetPage) {
+        queueCloudSyncOperation('UPDATE_PAGE', pageId, targetPage);
+      }
     },
-    [workspace, persistWorkspace]
+    [workspace, persistWorkspace, queueCloudSyncOperation]
   );
 
   const handleToggleFavorite = useCallback(
@@ -601,9 +1080,10 @@ export function AppContent() {
         notebooks: updatedNotebooks,
         activePageId: nextActivePage,
       });
+      queueCloudSyncOperation('DELETE_PAGE', pageId, { id: pageId });
       showNotification('Note deleted', 'info');
     },
-    [workspace, allPages, persistWorkspace, showNotification]
+    [workspace, allPages, persistWorkspace, showNotification, queueCloudSyncOperation]
   );
 
   const handleDeleteNotebook = useCallback(
@@ -617,9 +1097,10 @@ export function AppContent() {
         activeSectionId: updated[0]?.sections[0]?.id || null,
         activePageId: updated[0]?.sections[0]?.pages[0]?.id || null,
       });
+      queueCloudSyncOperation('DELETE_NOTEBOOK', notebookId, { id: notebookId });
       showNotification('Notebook deleted', 'info');
     },
-    [workspace, persistWorkspace, showNotification]
+    [workspace, persistWorkspace, showNotification, queueCloudSyncOperation]
   );
 
   const handleDeleteSection = useCallback(
@@ -1194,6 +1675,10 @@ export function AppContent() {
         aiMode={workspace.settings.aiConnectionMode}
         isInspectorOpen={!isInspectorCollapsed}
         onToggleInspector={() => setIsInspectorCollapsed((prev) => !prev)}
+        authUser={authUser}
+        syncStatus={syncStatus}
+        onOpenCloudSync={() => setIsCloudSyncModalOpen(true)}
+        onOpenConflictModal={() => setIsConflictModalOpen(true)}
       />
 
       {/* Main Workspace Body */}
@@ -1565,6 +2050,7 @@ export function AppContent() {
         onOpenVaultManager={() => setIsVaultManagerOpen(true)}
         onExportAllVaults={handleExportAllVaultsBundle}
         onWipeDeviceData={handleWipeDeviceData}
+        onOpenCloudSync={() => setIsCloudSyncModalOpen(true)}
         onToggleTheme={() =>
           setSettings((s) => ({ ...s, theme: s.theme === 'dark' ? 'light' : 'dark' }))
         }
@@ -1690,6 +2176,41 @@ export function AppContent() {
         onImportVaultFile={handleImportVaultFile}
         onDeleteVault={handleDeleteVault}
         onWipeDeviceData={handleWipeDeviceData}
+      />
+
+      {/* ☁️ Cloud Sync & Account Modal */}
+      <CloudSyncModal
+        isOpen={isCloudSyncModalOpen}
+        onClose={() => setIsCloudSyncModalOpen(false)}
+        currentUser={authUser}
+        encryptionKey={encryptionKey}
+        syncStatus={syncStatus}
+        onUserAuthenticated={(user, key, verifier) => {
+          setAuthUser(user);
+          setEncryptionKey(key);
+          setAuthVerifier(verifier);
+          showNotification(`Logged in as @${user.username}. Cloud Sync active!`, 'success');
+        }}
+        onUserLoggedOut={() => {
+          setAuthUser(null);
+          setEncryptionKey(null);
+          setAuthVerifier(null);
+          setSyncStatus({ state: 'local_saved', pendingCount: 0, lastSyncedAt: null });
+          showNotification('Logged out from cloud account.', 'info');
+        }}
+        onTriggerManualSync={handlePerformCloudSync}
+        onClearSyncQueue={handleClearSyncQueue}
+        onRecoverFromBackup={handleRecoverFromBackup}
+      />
+
+      {/* ⚠️ Multi-Device Conflict Resolution Modal */}
+      <ConflictResolutionModal
+        isOpen={isConflictModalOpen}
+        onClose={() => setIsConflictModalOpen(false)}
+        conflicts={conflicts}
+        onResolveKeepLocal={handleResolveKeepLocal}
+        onResolveKeepCloud={handleResolveKeepCloud}
+        onResolveDuplicateBoth={handleResolveDuplicateBoth}
       />
 
       {/* Toast Notification */}

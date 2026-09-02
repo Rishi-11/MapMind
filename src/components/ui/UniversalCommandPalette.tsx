@@ -16,6 +16,7 @@ import {
   FolderArchive,
   Archive,
   ShieldAlert,
+  Cloud,
 } from 'lucide-react';
 import { Workspace, Page, ViewMode } from '@/types/notebook';
 
@@ -32,6 +33,7 @@ interface UniversalCommandPaletteProps {
   onOpenVaultManager?: () => void;
   onExportAllVaults?: () => void;
   onWipeDeviceData?: () => void;
+  onOpenCloudSync?: () => void;
   onToggleTheme: () => void;
   isDarkMode: boolean;
 }
@@ -57,6 +59,7 @@ export const UniversalCommandPalette: React.FC<UniversalCommandPaletteProps> = (
   onOpenVaultManager,
   onExportAllVaults,
   onWipeDeviceData,
+  onOpenCloudSync,
   onToggleTheme,
   isDarkMode,
 }) => {
@@ -140,8 +143,15 @@ export const UniversalCommandPalette: React.FC<UniversalCommandPaletteProps> = (
         action: () => onOpenVaultManager?.(),
       },
       {
+        id: 'act-cloud-sync',
+        title: 'Cloud Sync & Accounts (Google Sheets AES-256-GCM)',
+        category: 'Actions',
+        icon: <Cloud className="w-4 h-4 text-purple-600" />,
+        action: () => onOpenCloudSync?.(),
+      },
+      {
         id: 'act-export-vault',
-        title: 'Export Active Vault Backup (JSON)',
+        title: 'Export Plaintext Backup (.mapnote / .json)',
         category: 'Actions',
         icon: <Download className="w-4 h-4 text-emerald-500" />,
         action: () => onExportVault(),

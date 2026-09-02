@@ -519,6 +519,67 @@ export async function listAllVaults(): Promise<VaultMetadata[]> {
 }
 
 /**
+ * Automatically clean and reconcile pages across notebook sections:
+ * - Ensures each page is placed in its rightful notebook and section based on notebookId and sectionId.
+ * - Deduplicates any accidental duplicate page entries by retaining the newest updated version.
+ * - Prevents misplaced pages from getting dumped into the first section.
+ */
+export function reconcileWorkspacePages(ws: Workspace): { workspace: Workspace; changed: boolean } {
+  let changed = false;
+  if (!ws || !ws.notebooks || ws.notebooks.length === 0) return { workspace: ws, changed: false };
+
+  const cloned = JSON.parse(JSON.stringify(ws)) as Workspace;
+
+  // 1. Gather all pages, deduplicating by ID with newest updatedAt
+  const pageMap = new Map<string, Page>();
+  for (const nb of cloned.notebooks) {
+    for (const sec of nb.sections) {
+      for (const p of sec.pages) {
+        if (!p || !p.id) continue;
+        const existing = pageMap.get(p.id);
+        if (!existing || new Date(p.updatedAt).getTime() >= new Date(existing.updatedAt).getTime()) {
+          pageMap.set(p.id, p);
+        }
+      }
+    }
+  }
+
+  // 2. Clear pages from all sections
+  for (const nb of cloned.notebooks) {
+    for (const sec of nb.sections) {
+      sec.pages = [];
+    }
+  }
+
+  // 3. Assign each unique page back to its exact notebook and section
+  for (const page of pageMap.values()) {
+    let nb = cloned.notebooks.find((n) => n.id === page.notebookId);
+    if (!nb) {
+      nb = cloned.notebooks[0];
+      if (nb) {
+        page.notebookId = nb.id;
+        changed = true;
+      }
+    }
+    if (!nb) continue;
+
+    let sec = nb.sections.find((s) => s.id === page.sectionId);
+    if (!sec) {
+      sec = nb.sections[0];
+      if (sec) {
+        page.sectionId = sec.id;
+        changed = true;
+      }
+    }
+    if (sec) {
+      sec.pages.push(page);
+    }
+  }
+
+  return { workspace: cloned, changed };
+}
+
+/**
  * Load the active vault workspace
  */
 export async function loadWorkspace(): Promise<Workspace> {
@@ -529,6 +590,11 @@ export async function loadWorkspace(): Promise<Workspace> {
     const saved = await db.get(STORE_NAME, targetKey);
 
     if (saved && saved.notebooks && saved.notebooks.length > 0) {
+      const reconciled = reconcileWorkspacePages(saved as Workspace);
+      if (reconciled.changed) {
+        await saveWorkspace(reconciled.workspace);
+        return reconciled.workspace;
+      }
       return saved as Workspace;
     }
   } catch (err) {

@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   BookOpen,
   BrainCircuit,
@@ -16,8 +16,12 @@ import {
   FolderArchive,
   PanelRight,
   Plus,
+  Cloud,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { Workspace, ViewMode } from '@/types/notebook';
+import { AuthUser, SyncStatusInfo } from '@/types/auth';
 
 interface UnifiedHeaderProps {
   workspace: Workspace;
@@ -36,6 +40,10 @@ interface UnifiedHeaderProps {
   onConnectLocalFolder?: () => void;
   isInspectorOpen?: boolean;
   onToggleInspector?: () => void;
+  authUser?: AuthUser | null;
+  syncStatus?: SyncStatusInfo;
+  onOpenCloudSync?: () => void;
+  onOpenConflictModal?: () => void;
 }
 
 export const UnifiedHeader: React.FC<UnifiedHeaderProps> = ({
@@ -53,6 +61,10 @@ export const UnifiedHeader: React.FC<UnifiedHeaderProps> = ({
   onConnectLocalFolder,
   isInspectorOpen = true,
   onToggleInspector,
+  authUser,
+  syncStatus,
+  onOpenCloudSync,
+  onOpenConflictModal,
 }) => {
   const modes: Array<{ id: ViewMode; label: string; icon: React.ReactNode }> = [
     { id: 'editor', label: 'Notes', icon: <BookOpen className="w-3.5 h-3.5" /> },
@@ -133,6 +145,46 @@ export const UnifiedHeader: React.FC<UnifiedHeaderProps> = ({
           </kbd>
         </button>
 
+        {/* Sync Conflict Alert Pill */}
+        {syncStatus?.state === 'conflict' && onOpenConflictModal && (
+          <button
+            onClick={onOpenConflictModal}
+            className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[11px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-800 animate-pulse"
+            title="Sync conflict detected. Click to resolve."
+          >
+            <AlertTriangle className="w-3 h-3 text-amber-600" />
+            <span>Conflict</span>
+          </button>
+        )}
+
+        {/* Cloud Sync Status Indicator */}
+        {onOpenCloudSync && (
+          <button
+            onClick={onOpenCloudSync}
+            className="hidden lg:flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors"
+            title={authUser ? `Encrypted Cloud Sync Active (@${authUser.username})` : 'Configure Cloud Sync & Multi-Device Sync'}
+          >
+            {syncStatus?.state === 'syncing' ? (
+              <>
+                <RefreshCw className="w-3 h-3 text-purple-600 animate-spin" />
+                <span className="text-[10px]">Syncing...</span>
+              </>
+            ) : authUser ? (
+              <>
+                <Cloud className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                <span className="text-[10px]">
+                  {syncStatus?.state === 'cloud_saved' ? 'Cloud Synced' : syncStatus?.pendingCount ? `${syncStatus.pendingCount} pending` : 'Cloud Ready'}
+                </span>
+              </>
+            ) : (
+              <>
+                <Cloud className="w-3.5 h-3.5 text-slate-400" />
+                <span className="text-[10px] text-slate-400">Local Only</span>
+              </>
+            )}
+          </button>
+        )}
+
         {/* Unified Status Pill: Storage + AI */}
         <div
           className="hidden xl:flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[11px] font-medium text-slate-500 dark:text-slate-400 bg-slate-100/50 dark:bg-slate-800/40"
@@ -147,6 +199,20 @@ export const UnifiedHeader: React.FC<UnifiedHeaderProps> = ({
 
         {/* Utility Action Icons */}
         <div className="flex items-center gap-0.5">
+          {onOpenCloudSync && (
+            <button
+              onClick={onOpenCloudSync}
+              className={`p-1.5 rounded-lg transition-colors ${
+                authUser
+                  ? 'text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/50'
+                  : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+              title={authUser ? `Cloud Account (@${authUser.username})` : 'Cloud Sync & Accounts'}
+            >
+              <Cloud className="w-4 h-4" />
+            </button>
+          )}
+
           <button
             onClick={onOpenVaultManager}
             className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
@@ -168,7 +234,7 @@ export const UnifiedHeader: React.FC<UnifiedHeaderProps> = ({
           <button
             onClick={onExportVault}
             className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            title="Save / Backup Vault (Ctrl+S)"
+            title="Save Plaintext Backup (Ctrl+S)"
           >
             <Download className="w-4 h-4" />
           </button>
@@ -178,21 +244,22 @@ export const UnifiedHeader: React.FC<UnifiedHeaderProps> = ({
               onClick={onToggleInspector}
               className={`p-1.5 rounded-lg transition-colors ${
                 isInspectorOpen
-                  ? 'bg-purple-100/80 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300'
+                  ? 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/50'
                   : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800'
               }`}
-              title={isInspectorOpen ? 'Collapse Inspector (Ctrl+J)' : 'Expand Inspector (Ctrl+J)'}
+              title="Toggle Knowledge Inspector (Ctrl+J)"
             >
               <PanelRight className="w-4 h-4" />
             </button>
           )}
 
+          {/* Theme Switcher */}
           <button
             onClick={onToggleTheme}
             className="p-1.5 rounded-lg text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
           >
-            {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-500" />}
+            {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
           </button>
         </div>
       </div>
