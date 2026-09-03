@@ -84,7 +84,6 @@ export const NotebookSidebar: React.FC<NotebookSidebarProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedNotebooks, setExpandedNotebooks] = useState<Record<string, boolean>>({});
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
-  const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
   const [isPinnedExpanded, setIsPinnedExpanded] = useState(true);
 
   // Rename states
@@ -342,52 +341,6 @@ export const NotebookSidebar: React.FC<NotebookSidebarProps> = ({
                 })}
               </div>
             )}
-          </div>
-        )}
-
-        {/* Collections */}
-        {workspace.collections && workspace.collections.length > 0 && (
-          <div>
-            <div className="flex items-center justify-between px-2.5 mb-1">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                Collections
-              </span>
-              {selectedCollectionId && (
-                <button
-                  onClick={() => setSelectedCollectionId(null)}
-                  className="text-[10px] text-purple-600 dark:text-purple-400 hover:underline"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-            <div className="space-y-0.5">
-              {workspace.collections.map((col) => {
-                const validPages = col.pageIds.filter((pid) =>
-                  workspace.notebooks.some((nb) => nb.sections.some((sec) => sec.pages.some((p) => p.id === pid)))
-                );
-                const isColActive = selectedCollectionId === col.id;
-                return (
-                  <div
-                    key={col.id}
-                    onClick={() => setSelectedCollectionId(isColActive ? null : col.id)}
-                    className={`flex items-center justify-between px-2.5 py-1 rounded-lg text-xs cursor-pointer transition-colors ${
-                      isColActive
-                        ? 'bg-purple-100 dark:bg-purple-950/60 text-purple-900 dark:text-purple-200 font-semibold shadow-xs'
-                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800/60'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs">{col.icon}</span>
-                      <span className="font-medium text-slate-700 dark:text-slate-300">{col.name}</span>
-                    </div>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-500 font-mono">
-                      {validPages.length}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
           </div>
         )}
 
@@ -711,10 +664,6 @@ export const NotebookSidebar: React.FC<NotebookSidebarProps> = ({
                                     if (selectedTag) {
                                       const pageTags = extractAllPageTags(p);
                                       if (!pageTags.includes(selectedTag.toLowerCase())) return false;
-                                    }
-                                    if (selectedCollectionId) {
-                                      const col = workspace.collections?.find((c) => c.id === selectedCollectionId);
-                                      if (col && !col.pageIds.includes(p.id)) return false;
                                     }
                                     if (searchQuery) {
                                       const q = searchQuery.toLowerCase();

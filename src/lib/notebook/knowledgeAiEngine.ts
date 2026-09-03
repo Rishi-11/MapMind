@@ -64,30 +64,45 @@ export function computeCosineSimilarity(vecA: Map<string, number>, vecB: Map<str
 }
 
 /**
- * Extracts key technical concepts & noun phrases from text
+ * Extracts key technical concepts & noun phrases from text and title
  */
-export function extractKeyConcepts(text: string): string[] {
+export function extractKeyConcepts(text: string, title = ''): string[] {
   const concepts = new Set<string>();
   const lines = text.split(/\r?\n/);
+
+  // Add words from title
+  if (title) {
+    const titleWords = title.split(/[\s,/:_()-]+/).filter((w) => w.length > 2 && !STOP_WORDS.has(w.toLowerCase()));
+    titleWords.forEach((w) => concepts.add(w.toLowerCase()));
+  }
 
   for (const line of lines) {
     // Markdown headings often contain core concepts
     if (line.startsWith('#')) {
       const headingText = line.replace(/^#+\s*/, '').trim();
-      if (headingText.length > 2) concepts.add(headingText);
+      if (headingText.length > 2) concepts.add(headingText.toLowerCase());
     }
 
     // Bold terms often highlight key concepts
     const boldMatches = line.match(/\*\*([^*]+)\*\*/g);
     if (boldMatches) {
       for (const m of boldMatches) {
-        const cleaned = m.replace(/\*\*/g, '').trim();
+        const cleaned = m.replace(/\*\*/g, '').trim().toLowerCase();
         if (cleaned.length > 2 && cleaned.length < 40) concepts.add(cleaned);
+      }
+    }
+
+    // Extract capitalized words & key nouns (length >= 4)
+    const words = line.split(/[\s,/:_().-]+/);
+    for (const w of words) {
+      const cleanW = w.trim().toLowerCase();
+      if (cleanW.length >= 4 && !STOP_WORDS.has(cleanW) && !/^\d+$/.test(cleanW)) {
+        concepts.add(cleanW);
       }
     }
   }
 
-  return Array.from(concepts).slice(0, 15);
+  return Array.from(concepts).slice(0, 30);
 }
 
 // Local user feedback cache in localStorage
@@ -127,12 +142,12 @@ export function analyzeRelationship(
   const tokensA = tokenizeText(`${pageA.title} ${pageA.title} ${bodyA}`);
   const tokensB = tokenizeText(`${pageB.title} ${pageB.title} ${bodyB}`);
 
-  // 1. Semantic TF-IDF similarity (50% weight)
+  // 1. Semantic TF-IDF cosine similarity (40% weight)
   const semantic = computeCosineSimilarity(tokensA, tokensB);
 
-  // 2. Shared concepts & keywords (20% weight)
-  const conceptsA = new Set(extractKeyConcepts(bodyA).map((c) => c.toLowerCase()));
-  const conceptsB = new Set(extractKeyConcepts(bodyB).map((c) => c.toLowerCase()));
+  // 2. Shared concepts & keywords (30% weight)
+  const conceptsA = new Set(extractKeyConcepts(bodyA, pageA.title));
+  const conceptsB = new Set(extractKeyConcepts(bodyB, pageB.title));
   let sharedConceptCount = 0;
   const commonConcepts: string[] = [];
   for (const c of conceptsA) {
@@ -142,14 +157,15 @@ export function analyzeRelationship(
     }
   }
   const maxConcepts = Math.max(1, Math.min(conceptsA.size, conceptsB.size));
-  const sharedConceptsScore = Math.min(1.0, sharedConceptCount / maxConcepts);
+  const sharedConceptsScore = Math.min(1.0, sharedConceptCount / Math.max(1, maxConcepts * 0.5));
 
-  // 3. Link distance & graph proximity (15% weight)
-  // Check if they share mutual neighbors or directly link
+  // 3. Proximity / Link distance (10% weight)
   const linkKeyAB = `${pageA.title.toLowerCase()}:::${pageB.title.toLowerCase()}`;
   const linkKeyBA = `${pageB.title.toLowerCase()}:::${pageA.title.toLowerCase()}`;
   const isDirectlyLinked = existingLinks.has(linkKeyAB) || existingLinks.has(linkKeyBA);
-  const linkDistanceScore = isDirectlyLinked ? 1.0 : 0.25;
+  const isSameSection = pageA.sectionId === pageB.sectionId;
+  const isSameNotebook = pageA.notebookId === pageB.notebookId;
+  const linkDistanceScore = isDirectlyLinked ? 1.0 : isSameSection ? 0.8 : isSameNotebook ? 0.5 : 0.2;
 
   // 4. Shared tags & properties (10% weight)
   const tagsA = new Set((pageA.tags || []).map((t) => t.toLowerCase()));
@@ -160,7 +176,7 @@ export function analyzeRelationship(
   }
   const sharedTagsScore = tagsA.size > 0 && tagsB.size > 0 ? sharedTagsCount / Math.max(1, Math.max(tagsA.size, tagsB.size)) : 0.1;
 
-  // 5. Title token similarity (5% weight)
+  // 5. Title token similarity (10% weight)
   const titleTokensA = new Set(tokenizeText(pageA.title).keys());
   const titleTokensB = new Set(tokenizeText(pageB.title).keys());
   let titleIntersection = 0;
@@ -170,36 +186,48 @@ export function analyzeRelationship(
   const titleUnion = new Set([...titleTokensA, ...titleTokensB]).size;
   const titleMatchScore = titleUnion > 0 ? titleIntersection / titleUnion : 0;
 
-  // Weighted combination
-  let rawConfidence =
-    semantic * 0.50 +
-    sharedConceptsScore * 0.20 +
-    linkDistanceScore * 0.15 +
+  // Calibrated weighted combination
+  let rawScore =
+    semantic * 0.35 +
+    sharedConceptsScore * 0.30 +
+    titleMatchScore * 0.15 +
     sharedTagsScore * 0.10 +
-    titleMatchScore * 0.05;
+    linkDistanceScore * 0.10;
+
+  // Intelligent boost curve so that notes with meaningful overlap score 60% - 95%
+  if (rawScore > 0.35) {
+    rawScore = Math.min(0.96, rawScore * 1.35 + 0.15);
+  } else if (rawScore > 0.15 || sharedConceptCount >= 2 || titleIntersection > 0) {
+    rawScore = Math.min(0.85, rawScore * 1.5 + 0.20);
+  } else if (isSameSection) {
+    rawScore = Math.min(0.70, rawScore + 0.30);
+  }
 
   // Check learned feedback
   const feedback = getLocalFeedback();
   const pairKey = [pageA.title.toLowerCase(), pageB.title.toLowerCase()].sort().join(':::');
   if (feedback[pairKey] === 'accepted') {
-    rawConfidence = Math.min(1.0, rawConfidence * 1.25);
+    rawScore = Math.min(0.99, rawScore * 1.3);
   } else if (feedback[pairKey] === 'rejected') {
-    rawConfidence = rawConfidence * 0.35;
+    rawScore = rawScore * 0.3;
   }
 
-  const confidence = Math.min(0.99, Math.max(0.05, Math.round(rawConfidence * 100) / 100));
+  const confidence = Math.min(0.99, Math.max(0.05, Math.round(rawScore * 100) / 100));
 
   // Determine relationship & reasoning
   let suggestedRelationship = 'related';
-  let reason = `Semantic similarity (${Math.round(semantic * 100)}%) across core knowledge topics.`;
+  let reason = `Semantic overlap (${Math.round(semantic * 100)}%) across core knowledge topics.`;
 
   if (commonConcepts.length > 0) {
-    reason = `Shares foundational concepts including "${commonConcepts.slice(0, 2).join('", "')}".`;
+    reason = `Shares foundational concepts including "${commonConcepts.slice(0, 3).join('", "')}".`;
     suggestedRelationship = 'uses';
   } else if (sharedTagsCount > 0) {
     reason = `Both categorized under shared tags (#${Array.from(tagsA).filter((t) => tagsB.has(t)).slice(0, 2).join(', #')}).`;
     suggestedRelationship = 'part_of';
-  } else if (semantic > 0.6) {
+  } else if (isSameSection) {
+    reason = `Co-located in the same notebook section and related by context.`;
+    suggestedRelationship = 'related';
+  } else if (semantic > 0.5) {
     reason = `High architectural and conceptual overlap between ${pageA.title} and ${pageB.title}.`;
     suggestedRelationship = 'depends_on';
   }
@@ -225,9 +253,12 @@ export function discoverAiSuggestions(
   targetPage: Page,
   allPages: Page[],
   mode: AiConnectionMode = 'suggest',
-  threshold = 0.60
+  threshold = 0.35
 ): AiConnectionSuggestion[] {
   if (mode === 'off' || allPages.length < 2) return [];
+
+  // Effective threshold: allow generous matching so suggestions appear reliably
+  const effectiveThreshold = Math.min(threshold, 0.40);
 
   // Build existing direct links set
   const existingLinks = new Set<string>();
@@ -239,6 +270,7 @@ export function discoverAiSuggestions(
   }
 
   const suggestions: AiConnectionSuggestion[] = [];
+  const candidates: Array<{ page: Page; analysis: ReturnType<typeof analyzeRelationship> }> = [];
 
   for (const otherPage of allPages) {
     if (otherPage.id === targetPage.id) continue;
@@ -250,22 +282,47 @@ export function discoverAiSuggestions(
 
     const analysis = analyzeRelationship(targetPage, otherPage, existingLinks);
 
-    // If already linked, only suggest if it has very high structural relevance and isn't dismissed
-    if (analysis.confidence >= threshold && (!isAlreadyLinked || mode === 'assisted')) {
-      suggestions.push({
-        id: `ai-sug-${targetPage.id}-${otherPage.id}`,
-        sourcePageId: targetPage.id,
-        targetPageId: otherPage.id,
-        sourceTitle: targetPage.title,
-        targetTitle: otherPage.title,
-        confidence: analysis.confidence,
-        reason: analysis.reason,
-        suggestedRelationship: analysis.suggestedRelationship,
-        status: 'pending',
-        mode,
-        scoreBreakdown: analysis.breakdown,
-        createdAt: new Date().toISOString(),
-      });
+    if (!isAlreadyLinked || mode === 'assisted') {
+      candidates.push({ page: otherPage, analysis });
+      if (analysis.confidence >= effectiveThreshold) {
+        suggestions.push({
+          id: `ai-sug-${targetPage.id}-${otherPage.id}`,
+          sourcePageId: targetPage.id,
+          targetPageId: otherPage.id,
+          sourceTitle: targetPage.title,
+          targetTitle: otherPage.title,
+          confidence: analysis.confidence,
+          reason: analysis.reason,
+          suggestedRelationship: analysis.suggestedRelationship,
+          status: 'pending',
+          mode,
+          scoreBreakdown: analysis.breakdown,
+          createdAt: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  // Fallback: If no suggestions exceeded effectiveThreshold, provide the top 3 highest scoring candidates
+  if (suggestions.length === 0 && candidates.length > 0) {
+    candidates.sort((a, b) => b.analysis.confidence - a.analysis.confidence);
+    for (const c of candidates.slice(0, 3)) {
+      if (c.analysis.confidence >= 0.15) {
+        suggestions.push({
+          id: `ai-sug-${targetPage.id}-${c.page.id}`,
+          sourcePageId: targetPage.id,
+          targetPageId: c.page.id,
+          sourceTitle: targetPage.title,
+          targetTitle: c.page.title,
+          confidence: c.analysis.confidence,
+          reason: c.analysis.reason,
+          suggestedRelationship: c.analysis.suggestedRelationship,
+          status: 'pending',
+          mode,
+          scoreBreakdown: c.analysis.breakdown,
+          createdAt: new Date().toISOString(),
+        });
+      }
     }
   }
 

@@ -47,6 +47,14 @@ export function parseFrontmatter(markdown: string): { properties: PageProperties
         currentKey = key;
         isArray = true;
         properties[key] = [];
+      } else if (val.startsWith('[') && val.endsWith(']')) {
+        currentKey = key;
+        isArray = false;
+        properties[key] = val
+          .slice(1, -1)
+          .split(',')
+          .map((s) => s.trim().replace(/^['"]|['"]$/g, ''))
+          .filter(Boolean);
       } else {
         currentKey = key;
         isArray = false;
@@ -57,6 +65,11 @@ export function parseFrontmatter(markdown: string): { properties: PageProperties
         else properties[key] = cleanVal;
       }
     }
+  }
+
+  // Normalize alias/aliases
+  if (properties.alias && !properties.aliases) {
+    properties.aliases = Array.isArray(properties.alias) ? properties.alias : [String(properties.alias)];
   }
 
   return { properties, body };
@@ -142,15 +155,84 @@ function extractContextSnippet(text: string, matchIndex: number, matchLength: nu
 }
 
 /**
+ * Extract all aliases defined for a page (from frontmatter aliases / alias or properties)
+ */
+export function getPageAliases(page: Page | { content?: string; properties?: PageProperties }): string[] {
+  const aliasesSet = new Set<string>();
+
+  if (page.properties?.aliases) {
+    if (Array.isArray(page.properties.aliases)) {
+      page.properties.aliases.forEach((a) => a && aliasesSet.add(String(a).trim()));
+    } else if (typeof page.properties.aliases === 'string') {
+      page.properties.aliases.split(',').forEach((a) => a && aliasesSet.add(a.trim()));
+    }
+  }
+
+  if (page.properties?.alias) {
+    if (Array.isArray(page.properties.alias)) {
+      page.properties.alias.forEach((a) => a && aliasesSet.add(String(a).trim()));
+    } else if (typeof page.properties.alias === 'string') {
+      page.properties.alias.split(',').forEach((a) => a && aliasesSet.add(a.trim()));
+    }
+  }
+
+  if (page.content) {
+    const { properties } = parseFrontmatter(page.content);
+    if (properties.aliases) {
+      if (Array.isArray(properties.aliases)) {
+        properties.aliases.forEach((a) => a && aliasesSet.add(String(a).trim()));
+      } else if (typeof properties.aliases === 'string') {
+        properties.aliases.split(',').forEach((a) => a && aliasesSet.add(a.trim()));
+      }
+    }
+    if (properties.alias) {
+      if (Array.isArray(properties.alias)) {
+        properties.alias.forEach((a) => a && aliasesSet.add(String(a).trim()));
+      } else if (typeof properties.alias === 'string') {
+        properties.alias.split(',').forEach((a) => a && aliasesSet.add(a.trim()));
+      }
+    }
+  }
+
+  return Array.from(aliasesSet).filter(Boolean);
+}
+
+/**
+ * Find page by title or any alias (case-insensitive)
+ */
+export function findPageByTitleOrAlias(query: string, pages: Page[]): Page | undefined {
+  if (!query) return undefined;
+  const cleanQuery = query.trim().toLowerCase();
+
+  // 1. Exact title match
+  const byTitle = pages.find((p) => p.title.trim().toLowerCase() === cleanQuery);
+  if (byTitle) return byTitle;
+
+  // 2. Exact alias match
+  for (const p of pages) {
+    const aliases = getPageAliases(p);
+    if (aliases.some((a) => a.toLowerCase() === cleanQuery)) {
+      return p;
+    }
+  }
+
+  return undefined;
+}
+
+/**
  * Builds the deterministic backlink index for all pages
  */
 export function buildBacklinkIndex(pages: Page[], notebookMap: Map<string, string>, sectionMap: Map<string, string>): Map<string, BacklinkItem[]> {
   const backlinkMap = new Map<string, BacklinkItem[]>();
 
-  // Helper to normalize page titles for robust matching
-  const titleToPageMap = new Map<string, Page>();
+  // Map titles AND all aliases to pages for backlink detection
+  const termToPageMap = new Map<string, Page>();
   for (const page of pages) {
-    titleToPageMap.set(page.title.toLowerCase().trim(), page);
+    termToPageMap.set(page.title.toLowerCase().trim(), page);
+    const aliases = getPageAliases(page);
+    for (const alias of aliases) {
+      termToPageMap.set(alias.toLowerCase().trim(), page);
+    }
     backlinkMap.set(page.id, []);
   }
 
@@ -160,8 +242,8 @@ export function buildBacklinkIndex(pages: Page[], notebookMap: Map<string, strin
     let match: RegExpExecArray | null;
 
     while ((match = regex.exec(body)) !== null) {
-      const targetTitle = match[1].trim();
-      const targetPage = titleToPageMap.get(targetTitle.toLowerCase());
+      const targetTitleOrAlias = match[1].trim();
+      const targetPage = termToPageMap.get(targetTitleOrAlias.toLowerCase());
 
       if (targetPage && targetPage.id !== sourcePage.id) {
         const { snippet, before, after } = extractContextSnippet(body, match.index, match[0].length);
@@ -188,7 +270,7 @@ export function buildBacklinkIndex(pages: Page[], notebookMap: Map<string, strin
 }
 
 /**
- * Detects unlinked mentions of a page title in other pages
+ * Detects unlinked mentions of a page title or any of its aliases in other pages
  */
 export function detectUnlinkedMentions(
   currentPage: Page,
@@ -196,37 +278,45 @@ export function detectUnlinkedMentions(
   notebookMap: Map<string, string>,
   sectionMap: Map<string, string>
 ): UnlinkedMentionItem[] {
-  if (!currentPage.title || currentPage.title.length < 3) return [];
+  const searchTerms = [currentPage.title, ...getPageAliases(currentPage)].filter(
+    (t) => t && t.trim().length >= 2
+  );
+  if (searchTerms.length === 0) return [];
 
   const mentions: UnlinkedMentionItem[] = [];
-  const escapedTitle = currentPage.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  // Match word boundary title, but ignore if already wrapped in [[...]]
-  const mentionRegex = new RegExp(`(?<!\\[\\[)\\b(${escapedTitle})\\b(?!\\]\\])`, 'gi');
 
-  for (const otherPage of allPages) {
-    if (otherPage.id === currentPage.id) continue;
+  for (const term of searchTerms) {
+    const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Match word boundary term, but ignore if already wrapped in [[...]]
+    const mentionRegex = new RegExp(`(?<!\\[\\[)\\b(${escapedTerm})\\b(?!\\]\\])`, 'gi');
 
-    const { body } = parseFrontmatter(otherPage.content);
-    let match: RegExpExecArray | null;
+    for (const otherPage of allPages) {
+      if (otherPage.id === currentPage.id) continue;
 
-    while ((match = mentionRegex.exec(body)) !== null) {
-      // Ensure this match is not inside code blocks or already linked
-      const matchedText = match[0];
-      const matchIndex = match.index;
-      const { snippet } = extractContextSnippet(body, matchIndex, matchedText.length);
+      const { body } = parseFrontmatter(otherPage.content);
+      let match: RegExpExecArray | null;
 
-      mentions.push({
-        sourcePageId: otherPage.id,
-        sourcePageTitle: otherPage.title,
-        notebookName: notebookMap.get(otherPage.notebookId) || 'Notebook',
-        sectionName: sectionMap.get(otherPage.sectionId) || 'Section',
-        snippet,
-        matchedText,
-        startIndex: matchIndex,
-        endIndex: matchIndex + matchedText.length,
-      });
+      while ((match = mentionRegex.exec(body)) !== null) {
+        // Ensure this match is not inside code blocks or already linked
+        const matchedText = match[0];
+        const matchIndex = match.index;
+        const { snippet } = extractContextSnippet(body, matchIndex, matchedText.length);
 
-      if (mentions.length > 20) break; // Limit for performance
+        if (!mentions.some((m) => m.sourcePageId === otherPage.id && m.startIndex === matchIndex)) {
+          mentions.push({
+            sourcePageId: otherPage.id,
+            sourcePageTitle: otherPage.title,
+            notebookName: notebookMap.get(otherPage.notebookId) || 'Notebook',
+            sectionName: sectionMap.get(otherPage.sectionId) || 'Section',
+            snippet,
+            matchedText,
+            startIndex: matchIndex,
+            endIndex: matchIndex + matchedText.length,
+          });
+        }
+
+        if (mentions.length > 25) break; // Limit for performance
+      }
     }
   }
 

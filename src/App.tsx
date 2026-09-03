@@ -46,7 +46,12 @@ import {
   VaultMetadata,
 } from '@/lib/notebook/storage';
 import { VaultManagerModal } from '@/components/notebook/VaultManagerModal';
-import { buildBacklinkIndex, detectUnlinkedMentions, convertMentionToWikiLink } from '@/lib/notebook/links';
+import {
+  buildBacklinkIndex,
+  detectUnlinkedMentions,
+  convertMentionToWikiLink,
+  findPageByTitleOrAlias,
+} from '@/lib/notebook/links';
 import { discoverAiSuggestions } from '@/lib/notebook/knowledgeAiEngine';
 import { markdownToMindMap, mindMapToMarkdown } from '@/lib/notebook/mindmapBridge';
 
@@ -163,9 +168,7 @@ export function AppContent() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     return typeof window !== 'undefined' && window.innerWidth < 960;
   });
-  const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(() => {
-    return typeof window !== 'undefined' && window.innerWidth < 1280;
-  });
+  const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
   // MapMind Canvas Graph State
@@ -781,8 +784,8 @@ export function AppContent() {
     return discoverAiSuggestions(
       activePage,
       allPages,
-      workspace.settings.aiConnectionMode,
-      workspace.settings.aiConfidenceThreshold
+      workspace.settings?.aiConnectionMode || 'suggest',
+      workspace.settings?.aiConfidenceThreshold || 0.35
     );
   }, [activePage, allPages, workspace]);
 
@@ -850,7 +853,7 @@ export function AppContent() {
                 properties: { type: 'concept', status: 'learning' },
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
-                content: `# ${name} Overview\n\nStart writing notes for ${name}...\n`,
+                content: `# ${name} Overview\n\n`,
               },
             ],
           },
@@ -942,7 +945,7 @@ export function AppContent() {
         properties: { type: 'note', status: 'draft' },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        content: `# ${title}\n\nStart typing here...\n`,
+        content: title === 'Untitled Note' ? '' : `# ${title}\n\n`,
       };
 
       let updatedNotebooks: Notebook[];
@@ -1215,13 +1218,11 @@ export function AppContent() {
     [workspace, persistWorkspace]
   );
 
-  // Navigate to page by title (from WikiLinks, Backlinks, etc.), auto-creating note if it does not exist
+  // Navigate to page by title or alias (from WikiLinks, Backlinks, etc.), auto-creating note if it does not exist
   const handleNavigateToPage = useCallback(
     (pageTitle: string) => {
       const trimmed = pageTitle.trim();
-      const found = allPages.find(
-        (p) => p.title.toLowerCase().trim() === trimmed.toLowerCase()
-      );
+      const found = findPageByTitleOrAlias(trimmed, allPages);
       if (found) {
         handleSelectPage(found.notebookId, found.sectionId, found.id);
         setViewMode('editor');
@@ -1727,6 +1728,8 @@ export function AppContent() {
                 onNavigateToPage={handleNavigateToPage}
                 onOpenMindMapForPage={handleOpenMindMapForPage}
                 onGenerateStudyDeck={() => setViewMode('study')}
+                aiSuggestionsCount={aiSuggestions.length}
+                onOpenAiInspector={() => setIsInspectorCollapsed(false)}
               />
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-400 bg-white dark:bg-slate-950">

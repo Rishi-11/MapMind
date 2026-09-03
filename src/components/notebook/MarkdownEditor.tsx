@@ -24,9 +24,12 @@ import {
   Flame,
   ShieldAlert,
   Plus,
+  Highlighter,
+  ChevronDown,
+  HelpCircle,
 } from 'lucide-react';
 import { Page, PageProperties } from '@/types/notebook';
-import { parseFrontmatter, toggleMarkdownTask } from '@/lib/notebook/links';
+import { parseFrontmatter, toggleMarkdownTask, getPageAliases } from '@/lib/notebook/links';
 
 interface MarkdownEditorProps {
   page: Page;
@@ -38,6 +41,8 @@ interface MarkdownEditorProps {
   onNavigateToPage: (pageTitle: string) => void;
   onOpenMindMapForPage: (page: Page) => void;
   onGenerateStudyDeck: (page: Page) => void;
+  aiSuggestionsCount?: number;
+  onOpenAiInspector?: () => void;
 }
 
 type EditorViewMode = 'preview' | 'split' | 'source';
@@ -51,6 +56,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   onNavigateToPage,
   onOpenMindMapForPage,
   onGenerateStudyDeck,
+  aiSuggestionsCount = 0,
+  onOpenAiInspector,
 }) => {
   const [viewMode, setViewMode] = useState<EditorViewMode>('split');
   const [title, setTitle] = useState(page.title);
@@ -59,10 +66,18 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
 
   // WikiLink autocomplete popup state
+  interface AutocompleteMatch {
+    page: Page;
+    title: string;
+    alias?: string;
+  }
+
   const [autocompleteOpen, setAutocompleteOpen] = useState(false);
   const [autocompleteQuery, setAutocompleteQuery] = useState('');
   const [autocompleteIndex, setAutocompleteIndex] = useState(0);
   const [cursorPosition, setCursorPosition] = useState(0);
+  const [scrollOffset, setScrollOffset] = useState(0);
+  const [calloutDropdownOpen, setCalloutDropdownOpen] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -137,26 +152,81 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     }
   };
 
-  // Autocomplete matching pages
-  const matchingPages = useMemo(() => {
+  // Autocomplete matching pages & aliases
+  const matchingPages = useMemo<AutocompleteMatch[]>(() => {
     if (!autocompleteOpen) return [];
-    return allPages
-      .filter(
-        (p) =>
-          p.id !== page.id &&
-          p.title.toLowerCase().includes(autocompleteQuery.toLowerCase())
-      )
-      .slice(0, 6);
+    const query = autocompleteQuery.toLowerCase().trim();
+    const results: AutocompleteMatch[] = [];
+
+    for (const p of allPages) {
+      if (p.id === page.id) continue;
+
+      // Match Page Title
+      if (p.title.toLowerCase().includes(query)) {
+        results.push({ page: p, title: p.title });
+      }
+
+      // Match Page Aliases
+      const aliases = getPageAliases(p);
+      for (const alias of aliases) {
+        if (alias.toLowerCase().includes(query) && alias.toLowerCase() !== p.title.toLowerCase()) {
+          results.push({ page: p, title: p.title, alias });
+        }
+      }
+    }
+
+    return results.slice(0, 8);
   }, [allPages, autocompleteOpen, autocompleteQuery, page.id]);
 
-  const insertWikiLink = (targetTitle: string, autoCreate = false) => {
+  // Dynamic Caret Coordinates for Autocomplete Popup (positions strictly below/above cursor line so it never blocks typing)
+  const popupCoords = useMemo(() => {
+    if (!textareaRef.current) return { top: 64, left: 32 };
+    const el = textareaRef.current;
+    const textBefore = content.slice(0, cursorPosition);
+    const lines = textBefore.split('\n');
+    const currentLineIndex = lines.length - 1;
+    const currentColIndex = lines[currentLineIndex]?.length || 0;
+
+    const style = window.getComputedStyle(el);
+    const lineHeight = parseFloat(style.lineHeight) || 22;
+    const paddingTop = parseFloat(style.paddingTop) || 24;
+    const paddingLeft = parseFloat(style.paddingLeft) || 24;
+
+    // Monospace text-sm char width is ~8.4px
+    const charWidth = 8.4;
+
+    // Position popup strictly BELOW the current line with safe clearance
+    let top = paddingTop + (currentLineIndex + 1) * lineHeight - (el.scrollTop || 0) + 8;
+    let left = paddingLeft + currentColIndex * charWidth;
+
+    const containerWidth = el.clientWidth || 600;
+    const popupWidth = 320;
+    const maxAllowedLeft = containerWidth - popupWidth - 24;
+
+    if (left > maxAllowedLeft) {
+      left = Math.max(16, maxAllowedLeft);
+    }
+
+    // If near bottom of container, flip above the line
+    const containerHeight = el.clientHeight || 500;
+    if (top + 240 > containerHeight && top > 260) {
+      top = paddingTop + currentLineIndex * lineHeight - (el.scrollTop || 0) - 240;
+    }
+
+    return {
+      top: Math.max(12, Math.round(top)),
+      left: Math.max(16, Math.round(left)),
+    };
+  }, [cursorPosition, autocompleteOpen, content, scrollOffset]);
+
+  const insertWikiLink = (targetTitle: string, alias?: string, autoCreate = false) => {
     if (!textareaRef.current) return;
     const textBefore = content.slice(0, cursorPosition);
     const lastDoubleBracket = textBefore.lastIndexOf('[[');
     const textAfter = content.slice(cursorPosition);
 
-    const newContent =
-      content.slice(0, lastDoubleBracket) + `[[${targetTitle}]]` + textAfter;
+    const linkText = alias ? `[[${targetTitle}|${alias}]]` : `[[${targetTitle}]]`;
+    const newContent = content.slice(0, lastDoubleBracket) + linkText + textAfter;
 
     handleContentChange(newContent);
     setAutocompleteOpen(false);
@@ -167,15 +237,19 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
 
     setTimeout(() => {
       if (textareaRef.current) {
-        const newPos = lastDoubleBracket + targetTitle.length + 4;
+        const newPos = lastDoubleBracket + linkText.length;
         textareaRef.current.focus();
         textareaRef.current.setSelectionRange(newPos, newPos);
       }
     }, 50);
   };
 
-  // Keyboard navigation for autocomplete
+  // Obsidian Hotkeys & Selection Auto-Pairing
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const isCtrlOrCmd = isMac ? e.metaKey : e.ctrlKey;
+
+    // 1. Autocomplete Popup Navigation
     if (autocompleteOpen) {
       if (matchingPages.length > 0) {
         if (e.key === 'ArrowDown') {
@@ -190,14 +264,15 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
         }
         if (e.key === 'Enter' || e.key === 'Tab') {
           e.preventDefault();
-          insertWikiLink(matchingPages[autocompleteIndex].title, false);
+          const match = matchingPages[autocompleteIndex];
+          insertWikiLink(match.title, match.alias, false);
           return;
         }
       } else if (autocompleteQuery.trim().length > 0) {
         if (e.key === 'Enter' || e.key === 'Tab') {
           e.preventDefault();
           const target = autocompleteQuery.trim();
-          insertWikiLink(target, true);
+          insertWikiLink(target, undefined, true);
           return;
         }
       }
@@ -205,6 +280,149 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
         e.preventDefault();
         setAutocompleteOpen(false);
         return;
+      }
+    }
+
+    // 2. Obsidian Hotkeys
+    // Ctrl/Cmd + K -> Insert WikiLink / Alias Link [[Page|Alias]]
+    if (isCtrlOrCmd && e.key.toLowerCase() === 'k' && !e.shiftKey) {
+      e.preventDefault();
+      if (!textareaRef.current) return;
+      const start = textareaRef.current.selectionStart;
+      const end = textareaRef.current.selectionEnd;
+      const selected = content.slice(start, end);
+
+      if (selected.trim().length > 0) {
+        // Wrap selection as alias [[Target|Selected]]
+        const replacement = `[[|${selected}]]`;
+        const newContent = content.slice(0, start) + replacement + content.slice(end);
+        handleContentChange(newContent);
+        setTimeout(() => {
+          if (textareaRef.current) {
+            textareaRef.current.focus();
+            textareaRef.current.setSelectionRange(start + 2, start + 2);
+          }
+        }, 50);
+      } else {
+        // Insert [[]] and trigger autocomplete
+        const replacement = '[[]]';
+        const newContent = content.slice(0, start) + replacement + content.slice(end);
+        handleContentChange(newContent);
+        setTimeout(() => {
+          if (textareaRef.current) {
+            textareaRef.current.focus();
+            textareaRef.current.setSelectionRange(start + 2, start + 2);
+            setCursorPosition(start + 2);
+            setAutocompleteQuery('');
+            setAutocompleteOpen(true);
+            setAutocompleteIndex(0);
+          }
+        }, 50);
+      }
+      return;
+    }
+
+    // Ctrl/Cmd + Enter -> Toggle / Cycle Task Checkbox on current line
+    if (isCtrlOrCmd && e.key === 'Enter') {
+      e.preventDefault();
+      if (!textareaRef.current) return;
+      const pos = textareaRef.current.selectionStart;
+      const lines = content.split(/\r?\n/);
+      let charCount = 0;
+      let currentLineIdx = 0;
+
+      for (let i = 0; i < lines.length; i++) {
+        const lineLen = lines[i].length + 1; // +1 for newline
+        if (charCount + lineLen > pos || i === lines.length - 1) {
+          currentLineIdx = i;
+          break;
+        }
+        charCount += lineLen;
+      }
+
+      const line = lines[currentLineIdx];
+      let updatedLine = line;
+      if (line.match(/^(\s*)[-*+]\s*\[ \]\s*(.*)$/)) {
+        updatedLine = line.replace(/^(\s*)[-*+]\s*\[ \]\s*/, '$1- [x] ');
+      } else if (line.match(/^(\s*)[-*+]\s*\[[xX]\]\s*(.*)$/)) {
+        updatedLine = line.replace(/^(\s*)[-*+]\s*\[[xX]\]\s*/, '$1');
+      } else {
+        updatedLine = line.replace(/^(\s*)(.*)$/, '$1- [ ] $2');
+      }
+
+      lines[currentLineIdx] = updatedLine;
+      const newContent = lines.join('\n');
+      handleContentChange(newContent);
+      return;
+    }
+
+    // Ctrl/Cmd + Shift + H -> Highlight ==text==
+    if (isCtrlOrCmd && e.shiftKey && e.key.toLowerCase() === 'h') {
+      e.preventDefault();
+      applyFormatting('==', '==');
+      return;
+    }
+
+    // Ctrl/Cmd + Shift + S -> Strikethrough ~~text~~
+    if (isCtrlOrCmd && e.shiftKey && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      applyFormatting('~~', '~~');
+      return;
+    }
+
+    // Ctrl/Cmd + Shift + C -> Insert Callout
+    if (isCtrlOrCmd && e.shiftKey && e.key.toLowerCase() === 'c') {
+      e.preventDefault();
+      applyFormatting('> [!NOTE]\n> ', '');
+      return;
+    }
+
+    // Ctrl/Cmd + B -> Bold
+    if (isCtrlOrCmd && e.key.toLowerCase() === 'b') {
+      e.preventDefault();
+      applyFormatting('**', '**');
+      return;
+    }
+
+    // Ctrl/Cmd + I -> Italic
+    if (isCtrlOrCmd && e.key.toLowerCase() === 'i') {
+      e.preventDefault();
+      applyFormatting('*', '*');
+      return;
+    }
+
+    // 3. Selection Auto-Pairing (Bracket/Quote/Marker Wrapping)
+    if (textareaRef.current) {
+      const start = textareaRef.current.selectionStart;
+      const end = textareaRef.current.selectionEnd;
+      if (start !== end) {
+        const selected = content.slice(start, end);
+        const pairs: Record<string, [string, string]> = {
+          '[': ['[[', ']]'],
+          '(': ['(', ')'],
+          '{': ['{', '}'],
+          '"': ['"', '"'],
+          "'": ["'", "'"],
+          '`': ['`', '`'],
+          '*': ['**', '**'],
+          '=': ['==', '=='],
+          '~': ['~~', '~~'],
+        };
+
+        if (pairs[e.key]) {
+          e.preventDefault();
+          const [prefix, suffix] = pairs[e.key];
+          const replacement = `${prefix}${selected}${suffix}`;
+          const newContent = content.slice(0, start) + replacement + content.slice(end);
+          handleContentChange(newContent);
+          setTimeout(() => {
+            if (textareaRef.current) {
+              textareaRef.current.focus();
+              textareaRef.current.setSelectionRange(start + prefix.length, end + prefix.length);
+            }
+          }, 50);
+          return;
+        }
       }
     }
   };
@@ -314,11 +532,14 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
         continue;
       }
 
-      // Callouts: > [!NOTE], > [!TIP], > [!WARNING], > [!IMPORTANT], > [!CAUTION]
-      const calloutMatch = line.match(/^>\s*\[!(NOTE|TIP|WARNING|IMPORTANT|CAUTION)\]\s*(.*)$/i);
+      // Callouts: > [!NOTE], > [!TIP], > [!WARNING], > [!IMPORTANT], > [!CAUTION], > [!INFO], > [!TODO], > [!DANGER], > [!BUG], > [!SUCCESS], > [!QUESTION], > [!QUOTE], > [!EXAMPLE]
+      // Supports foldable syntax: > [!NOTE]- Folded or > [!NOTE]+ Open
+      const calloutMatch = line.match(/^>\s*\[!(NOTE|TIP|WARNING|IMPORTANT|CAUTION|INFO|TODO|DANGER|ERROR|BUG|SUCCESS|CHECK|DONE|QUESTION|HELP|FAQ|QUOTE|CITE|EXAMPLE)\]([-+])?\s*(.*)$/i);
       if (calloutMatch) {
         const type = calloutMatch[1].toUpperCase();
-        let calloutBody = calloutMatch[2] ? [calloutMatch[2]] : [];
+        const foldChar = calloutMatch[2]; // '-' or '+' or undefined
+        const titleOverride = calloutMatch[3]?.trim();
+        let calloutBody: string[] = [];
 
         // Collect following blockquote lines
         while (i + 1 < lines.length && lines[i + 1].startsWith('>')) {
@@ -326,28 +547,55 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
           calloutBody.push(lines[i].replace(/^>\s*/, ''));
         }
 
-        const calloutStyles: Record<string, { bg: string; border: string; text: string; icon: React.ReactNode }> = {
-          NOTE: { bg: 'bg-blue-50 dark:bg-blue-950/30', border: 'border-blue-500', text: 'text-blue-900 dark:text-blue-200', icon: <Info className="w-4 h-4 text-blue-500" /> },
-          TIP: { bg: 'bg-emerald-50 dark:bg-emerald-950/30', border: 'border-emerald-500', text: 'text-emerald-900 dark:text-emerald-200', icon: <Sparkles className="w-4 h-4 text-emerald-500" /> },
-          WARNING: { bg: 'bg-amber-50 dark:bg-amber-950/30', border: 'border-amber-500', text: 'text-amber-900 dark:text-amber-200', icon: <AlertCircle className="w-4 h-4 text-amber-500" /> },
-          IMPORTANT: { bg: 'bg-purple-50 dark:bg-purple-950/30', border: 'border-purple-500', text: 'text-purple-900 dark:text-purple-200', icon: <Flame className="w-4 h-4 text-purple-500" /> },
-          CAUTION: { bg: 'bg-red-50 dark:bg-red-950/30', border: 'border-red-500', text: 'text-red-900 dark:text-red-200', icon: <ShieldAlert className="w-4 h-4 text-red-500" /> },
+        const calloutStyles: Record<string, { bg: string; border: string; text: string; icon: React.ReactNode; defaultTitle: string }> = {
+          NOTE: { bg: 'bg-blue-50/70 dark:bg-blue-950/30', border: 'border-blue-500', text: 'text-blue-900 dark:text-blue-200', icon: <Info className="w-4 h-4 text-blue-500 shrink-0" />, defaultTitle: 'Note' },
+          INFO: { bg: 'bg-blue-50/70 dark:bg-blue-950/30', border: 'border-blue-500', text: 'text-blue-900 dark:text-blue-200', icon: <Info className="w-4 h-4 text-blue-500 shrink-0" />, defaultTitle: 'Info' },
+          TODO: { bg: 'bg-sky-50/70 dark:bg-sky-950/30', border: 'border-sky-500', text: 'text-sky-900 dark:text-sky-200', icon: <CheckSquare className="w-4 h-4 text-sky-500 shrink-0" />, defaultTitle: 'Todo' },
+          TIP: { bg: 'bg-emerald-50/70 dark:bg-emerald-950/30', border: 'border-emerald-500', text: 'text-emerald-900 dark:text-emerald-200', icon: <Sparkles className="w-4 h-4 text-emerald-500 shrink-0" />, defaultTitle: 'Tip' },
+          HINT: { bg: 'bg-emerald-50/70 dark:bg-emerald-950/30', border: 'border-emerald-500', text: 'text-emerald-900 dark:text-emerald-200', icon: <Sparkles className="w-4 h-4 text-emerald-500 shrink-0" />, defaultTitle: 'Hint' },
+          IMPORTANT: { bg: 'bg-purple-50/70 dark:bg-purple-950/30', border: 'border-purple-500', text: 'text-purple-900 dark:text-purple-200', icon: <Flame className="w-4 h-4 text-purple-500 shrink-0" />, defaultTitle: 'Important' },
+          WARNING: { bg: 'bg-amber-50/70 dark:bg-amber-950/30', border: 'border-amber-500', text: 'text-amber-900 dark:text-amber-200', icon: <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />, defaultTitle: 'Warning' },
+          CAUTION: { bg: 'bg-orange-50/70 dark:bg-orange-950/30', border: 'border-orange-500', text: 'text-orange-900 dark:text-orange-200', icon: <ShieldAlert className="w-4 h-4 text-orange-500 shrink-0" />, defaultTitle: 'Caution' },
+          DANGER: { bg: 'bg-rose-50/70 dark:bg-rose-950/30', border: 'border-rose-500', text: 'text-rose-900 dark:text-rose-200', icon: <ShieldAlert className="w-4 h-4 text-rose-500 shrink-0" />, defaultTitle: 'Danger' },
+          ERROR: { bg: 'bg-rose-50/70 dark:bg-rose-950/30', border: 'border-rose-500', text: 'text-rose-900 dark:text-rose-200', icon: <ShieldAlert className="w-4 h-4 text-rose-500 shrink-0" />, defaultTitle: 'Error' },
+          BUG: { bg: 'bg-red-50/70 dark:bg-red-950/30', border: 'border-red-500', text: 'text-red-900 dark:text-red-200', icon: <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />, defaultTitle: 'Bug' },
+          SUCCESS: { bg: 'bg-emerald-50/70 dark:bg-emerald-950/30', border: 'border-emerald-500', text: 'text-emerald-900 dark:text-emerald-200', icon: <Check className="w-4 h-4 text-emerald-500 shrink-0" />, defaultTitle: 'Success' },
+          CHECK: { bg: 'bg-emerald-50/70 dark:bg-emerald-950/30', border: 'border-emerald-500', text: 'text-emerald-900 dark:text-emerald-200', icon: <Check className="w-4 h-4 text-emerald-500 shrink-0" />, defaultTitle: 'Check' },
+          DONE: { bg: 'bg-emerald-50/70 dark:bg-emerald-950/30', border: 'border-emerald-500', text: 'text-emerald-900 dark:text-emerald-200', icon: <Check className="w-4 h-4 text-emerald-500 shrink-0" />, defaultTitle: 'Done' },
+          QUESTION: { bg: 'bg-indigo-50/70 dark:bg-indigo-950/30', border: 'border-indigo-500', text: 'text-indigo-900 dark:text-indigo-200', icon: <HelpCircle className="w-4 h-4 text-indigo-500 shrink-0" />, defaultTitle: 'Question' },
+          HELP: { bg: 'bg-indigo-50/70 dark:bg-indigo-950/30', border: 'border-indigo-500', text: 'text-indigo-900 dark:text-indigo-200', icon: <HelpCircle className="w-4 h-4 text-indigo-500 shrink-0" />, defaultTitle: 'Help' },
+          FAQ: { bg: 'bg-indigo-50/70 dark:bg-indigo-950/30', border: 'border-indigo-500', text: 'text-indigo-900 dark:text-indigo-200', icon: <HelpCircle className="w-4 h-4 text-indigo-500 shrink-0" />, defaultTitle: 'FAQ' },
+          QUOTE: { bg: 'bg-slate-100/80 dark:bg-slate-900/60', border: 'border-slate-400 dark:border-slate-600', text: 'text-slate-800 dark:text-slate-200', icon: <Quote className="w-4 h-4 text-slate-500 shrink-0" />, defaultTitle: 'Quote' },
+          CITE: { bg: 'bg-slate-100/80 dark:bg-slate-900/60', border: 'border-slate-400 dark:border-slate-600', text: 'text-slate-800 dark:text-slate-200', icon: <Quote className="w-4 h-4 text-slate-500 shrink-0" />, defaultTitle: 'Cite' },
+          EXAMPLE: { bg: 'bg-violet-50/70 dark:bg-violet-950/30', border: 'border-violet-500', text: 'text-violet-900 dark:text-violet-200', icon: <List className="w-4 h-4 text-violet-500 shrink-0" />, defaultTitle: 'Example' },
         };
 
         const style = calloutStyles[type] || calloutStyles.NOTE;
+        const displayTitle = titleOverride || style.defaultTitle;
+        const isFoldable = foldChar === '-' || foldChar === '+';
+        const defaultOpen = foldChar !== '-';
 
         elements.push(
-          <div key={`callout-${i}`} className={`my-4 p-3.5 rounded-xl border-l-4 ${style.border} ${style.bg} shadow-xs`}>
-            <div className="flex items-center gap-2 font-bold text-xs uppercase tracking-wider mb-1">
-              {style.icon}
-              <span className={style.text}>{type}</span>
-            </div>
-            <div className={`text-xs ${style.text} leading-relaxed`}>
+          <details
+            key={`callout-${i}`}
+            open={defaultOpen}
+            className={`my-4 rounded-xl border-l-4 ${style.border} ${style.bg} shadow-xs group`}
+          >
+            <summary className={`flex items-center justify-between p-3 select-none font-bold text-xs uppercase tracking-wider list-none ${isFoldable ? 'cursor-pointer hover:opacity-80' : ''}`}>
+              <div className="flex items-center gap-2">
+                {style.icon}
+                <span className={style.text}>{displayTitle}</span>
+              </div>
+              {isFoldable && (
+                <span className="text-[10px] opacity-60 font-mono group-open:rotate-180 transition-transform">▼</span>
+              )}
+            </summary>
+            <div className={`px-3.5 pb-3.5 pt-0.5 text-xs ${style.text} leading-relaxed space-y-1`}>
               {calloutBody.map((cb, idx) => (
                 <p key={idx} className="mt-0.5">{renderInlineFormatting(cb)}</p>
               ))}
             </div>
-          </div>
+          </details>
         );
         continue;
       }
@@ -439,7 +687,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     return elements;
   };
 
-  // Render Inline Markdown: Bold, Italic, Code, KaTeX Math, WikiLinks [[...]]
+  // Render Inline Markdown: Bold, Italic, Code, KaTeX Math, WikiLinks [[...]], Highlights ==...==, Strike ~~...~~
   const renderInlineFormatting = (text: string): React.ReactNode => {
     // Match WikiLinks [[Page Title|Display]]
     const parts: React.ReactNode[] = [];
@@ -482,10 +730,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   };
 
   const renderBasicInline = (text: string, keyPrefix: string): React.ReactNode => {
-    const processed = text;
-
-    // Split by inline code `code`
-    const codeParts = processed.split(/`([^`]+)`/g);
+    // 1. Split by inline code `code`
+    const codeParts = text.split(/`([^`]+)`/g);
     return codeParts.map((chunk, idx) => {
       if (idx % 2 === 1) {
         return (
@@ -495,24 +741,56 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
         );
       }
 
-      // Handle bold **text** and tags #tag
-      const boldParts = chunk.split(/\*\*([^*]+)\*\*/g);
-      return boldParts.map((bChunk, bIdx) => {
-        if (bIdx % 2 === 1) {
-          return <strong key={`${keyPrefix}-bold-${idx}-${bIdx}`} className="font-bold text-slate-900 dark:text-white">{bChunk}</strong>;
+      // 2. Split by Highlight ==highlight==
+      const highlightParts = chunk.split(/==([^=]+)==/g);
+      return highlightParts.map((hChunk, hIdx) => {
+        if (hIdx % 2 === 1) {
+          return (
+            <mark key={`${keyPrefix}-mark-${idx}-${hIdx}`} className="bg-amber-200/90 dark:bg-amber-400/30 text-slate-900 dark:text-amber-100 px-1 py-0.5 rounded font-medium shadow-xs">
+              {hChunk}
+            </mark>
+          );
         }
 
-        // Handle tags
-        const tagParts = bChunk.split(/(#[a-zA-Z0-9_\-/]+)/g);
-        return tagParts.map((tChunk, tIdx) => {
-          if (tChunk.startsWith('#') && tChunk.length > 1) {
+        // 3. Split by Strikethrough ~~strike~~
+        const strikeParts = hChunk.split(/~~([^~]+)~~/g);
+        return strikeParts.map((sChunk, sIdx) => {
+          if (sIdx % 2 === 1) {
             return (
-              <span key={`${keyPrefix}-tag-${idx}-${bIdx}-${tIdx}`} className="inline-flex items-center text-purple-600 dark:text-purple-400 font-medium hover:underline">
-                {tChunk}
-              </span>
+              <del key={`${keyPrefix}-del-${idx}-${hIdx}-${sIdx}`} className="line-through text-slate-400 dark:text-slate-500">
+                {sChunk}
+              </del>
             );
           }
-          return tChunk;
+
+          // 4. Handle bold **text**
+          const boldParts = sChunk.split(/\*\*([^*]+)\*\*/g);
+          return boldParts.map((bChunk, bIdx) => {
+            if (bIdx % 2 === 1) {
+              return <strong key={`${keyPrefix}-bold-${idx}-${hIdx}-${sIdx}-${bIdx}`} className="font-bold text-slate-900 dark:text-white">{bChunk}</strong>;
+            }
+
+            // 5. Handle italic *text*
+            const italicParts = bChunk.split(/\*([^*]+)\*/g);
+            return italicParts.map((iChunk, iIdx) => {
+              if (iIdx % 2 === 1) {
+                return <em key={`${keyPrefix}-em-${idx}-${hIdx}-${sIdx}-${bIdx}-${iIdx}`} className="italic text-slate-800 dark:text-slate-200">{iChunk}</em>;
+              }
+
+              // 6. Handle tags #tag
+              const tagParts = iChunk.split(/(#[a-zA-Z0-9_\-/]+)/g);
+              return tagParts.map((tChunk, tIdx) => {
+                if (tChunk.startsWith('#') && tChunk.length > 1) {
+                  return (
+                    <span key={`${keyPrefix}-tag-${idx}-${hIdx}-${sIdx}-${bIdx}-${iIdx}-${tIdx}`} className="inline-flex items-center text-purple-600 dark:text-purple-400 font-medium hover:underline">
+                      {tChunk}
+                    </span>
+                  );
+                }
+                return tChunk;
+              });
+            });
+          });
         });
       });
     });
@@ -541,9 +819,16 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
           <button
             onClick={() => applyFormatting('~~', '~~')}
             className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
-            title="Strikethrough"
+            title="Strikethrough (Ctrl+Shift+S)"
           >
             <Strikethrough className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => applyFormatting('==', '==')}
+            className="p-1.5 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-950/40 text-amber-500 hover:text-amber-700 dark:hover:text-amber-300 transition-colors"
+            title="Highlight Marker (Ctrl+Shift+H)"
+          >
+            <Highlighter className="w-3.5 h-3.5" />
           </button>
           <div className="w-px h-3 bg-slate-200 dark:bg-slate-800 mx-0.5" />
           <button
@@ -571,7 +856,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
           <button
             onClick={() => applyFormatting('- [ ] ')}
             className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
-            title="Checklist Task"
+            title="Checklist Task (Ctrl+Enter)"
           >
             <CheckSquare className="w-3.5 h-3.5" />
           </button>
@@ -585,28 +870,94 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
           <button
             onClick={() => applyFormatting('`', '`')}
             className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
-            title="Inline Code"
+            title="Inline Code (`)"
           >
             <Code className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => applyFormatting('[[', ']]')}
             className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
-            title="Wiki Link [[...]]"
+            title="Wiki Link [[...]] (Ctrl+K)"
           >
             <LinkIcon className="w-3.5 h-3.5" />
           </button>
           <button
-            onClick={() => applyFormatting('> [!NOTE]\n> ')}
-            className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
-            title="Callout Admonition"
+            onClick={() => applyFormatting('[[|', ']]')}
+            className="px-1.5 py-0.5 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-950/40 text-purple-600 dark:text-purple-400 font-mono text-[10px] font-bold border border-purple-200 dark:border-purple-800/60 transition-colors"
+            title="Link with Alias [[Page|Alias]]"
           >
-            <Quote className="w-3.5 h-3.5" />
+            [[|]]
           </button>
+
+          {/* Callout Dropdown Menu */}
+          <div className="relative">
+            <button
+              onClick={() => setCalloutDropdownOpen(!calloutDropdownOpen)}
+              className="flex items-center gap-0.5 px-1.5 py-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-xs transition-colors"
+              title="Insert Callout (Ctrl+Shift+C)"
+            >
+              <Quote className="w-3.5 h-3.5" />
+              <ChevronDown className="w-2.5 h-2.5 opacity-60" />
+            </button>
+
+            {calloutDropdownOpen && (
+              <div
+                className="absolute left-0 top-full mt-1 w-44 bg-white dark:bg-slate-900 rounded-xl shadow-xl border border-slate-200 dark:border-slate-800 py-1.5 z-50 text-xs"
+                onMouseLeave={() => setCalloutDropdownOpen(false)}
+              >
+                <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Obsidian Callouts
+                </div>
+                {[
+                  { type: 'NOTE', label: 'Note', icon: <Info className="w-3.5 h-3.5 text-blue-500" /> },
+                  { type: 'TIP', label: 'Tip', icon: <Sparkles className="w-3.5 h-3.5 text-emerald-500" /> },
+                  { type: 'WARNING', label: 'Warning', icon: <AlertCircle className="w-3.5 h-3.5 text-amber-500" /> },
+                  { type: 'IMPORTANT', label: 'Important', icon: <Flame className="w-3.5 h-3.5 text-purple-500" /> },
+                  { type: 'CAUTION', label: 'Caution', icon: <ShieldAlert className="w-3.5 h-3.5 text-orange-500" /> },
+                  { type: 'SUCCESS', label: 'Success', icon: <Check className="w-3.5 h-3.5 text-emerald-500" /> },
+                  { type: 'QUESTION', label: 'Question', icon: <HelpCircle className="w-3.5 h-3.5 text-indigo-500" /> },
+                  { type: 'TODO', label: 'Todo', icon: <CheckSquare className="w-3.5 h-3.5 text-sky-500" /> },
+                  { type: 'QUOTE', label: 'Quote', icon: <Quote className="w-3.5 h-3.5 text-slate-500" /> },
+                  { type: 'EXAMPLE', label: 'Example', icon: <List className="w-3.5 h-3.5 text-violet-500" /> },
+                ].map((item) => (
+                  <button
+                    key={item.type}
+                    onClick={() => {
+                      applyFormatting(`> [!${item.type}]\n> `, '');
+                      setCalloutDropdownOpen(false);
+                    }}
+                    className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-left transition-colors"
+                  >
+                    {item.icon}
+                    <span>{item.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Right Tools: View Mode Switcher + Mind Map Generator Action */}
         <div className="flex items-center gap-1.5 shrink-0">
+          {onOpenAiInspector && (
+            <button
+              onClick={onOpenAiInspector}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                (aiSuggestionsCount || 0) > 0
+                  ? 'bg-purple-100 hover:bg-purple-200 dark:bg-purple-950/70 dark:hover:bg-purple-900 text-purple-700 dark:text-purple-300 border border-purple-300/80 dark:border-purple-700 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+              title="Open AI Knowledge Assistant & Suggested Connections (Ctrl+J)"
+            >
+              <Sparkles className={`w-3.5 h-3.5 ${(aiSuggestionsCount || 0) > 0 ? 'text-purple-600 dark:text-purple-400 animate-pulse' : 'text-slate-400'}`} />
+              <span className="hidden sm:inline">
+                {(aiSuggestionsCount || 0) > 0
+                  ? `${aiSuggestionsCount} AI Connection${aiSuggestionsCount > 1 ? 's' : ''}`
+                  : 'AI Inspector'}
+              </span>
+            </button>
+          )}
+
           <button
             onClick={() => onOpenMindMapForPage(page)}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-purple-600 hover:bg-purple-700 text-white shadow-xs transition-all"
@@ -727,6 +1078,13 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
               value={content}
               onChange={(e) => handleContentChange(e.target.value)}
               onKeyDown={handleKeyDown}
+              onScroll={() => setScrollOffset(textareaRef.current?.scrollTop || 0)}
+              onClick={() => {
+                if (textareaRef.current) setCursorPosition(textareaRef.current.selectionStart);
+              }}
+              onKeyUp={() => {
+                if (textareaRef.current) setCursorPosition(textareaRef.current.selectionStart);
+              }}
               placeholder="Write your markdown knowledge notes here..."
               className={`w-full h-full p-4 sm:p-6 lg:p-8 text-xs sm:text-sm font-mono leading-relaxed bg-transparent text-slate-800 dark:text-slate-100 resize-none focus:outline-none custom-scrollbar ${
                 viewMode === 'source' ? 'max-w-4xl mx-auto block' : ''
@@ -742,18 +1100,24 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
           </div>
         )}
 
-        {/* Autocomplete Popup Menu for [[WikiLinks]] */}
+        {/* Autocomplete Popup Menu for [[WikiLinks]] & Aliases */}
         {autocompleteOpen && (matchingPages.length > 0 || autocompleteQuery.trim().length > 0) && (
-          <div className="absolute left-10 top-20 z-50 w-72 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-purple-200 dark:border-purple-800 overflow-hidden animate-in fade-in zoom-in-95 duration-100">
+          <div
+            style={{
+              top: `${popupCoords.top}px`,
+              left: `${popupCoords.left}px`,
+            }}
+            className="absolute z-50 w-80 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-xl shadow-2xl border border-purple-300 dark:border-purple-700 overflow-hidden animate-in fade-in zoom-in-95 duration-100"
+          >
             <div className="px-3 py-1.5 bg-purple-50 dark:bg-purple-950/60 border-b border-purple-200 dark:border-purple-800 text-[10px] font-bold text-purple-700 dark:text-purple-300 uppercase tracking-wider flex items-center justify-between">
-              <span>Link or Create Note</span>
+              <span>Link Note or Alias</span>
               <span className="text-[9px] text-purple-500 font-mono">Enter / Tab</span>
             </div>
-            <div className="max-h-48 overflow-y-auto py-1">
-              {matchingPages.map((p, idx) => (
+            <div className="max-h-56 overflow-y-auto py-1 custom-scrollbar">
+              {matchingPages.map((item, idx) => (
                 <div
-                  key={p.id}
-                  onClick={() => insertWikiLink(p.title, false)}
+                  key={`${item.page.id}-${item.alias || 'title'}`}
+                  onClick={() => insertWikiLink(item.title, item.alias, false)}
                   className={`px-3 py-1.5 text-xs flex items-center justify-between cursor-pointer ${
                     idx === autocompleteIndex
                       ? 'bg-purple-600 text-white font-medium'
@@ -761,16 +1125,25 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
                   }`}
                 >
                   <div className="flex items-center gap-2 truncate">
-                    <FileText className="w-3.5 h-3.5 opacity-70" />
-                    <span className="truncate">{p.title}</span>
+                    <FileText className="w-3.5 h-3.5 opacity-70 shrink-0" />
+                    <span className="truncate">{item.title}</span>
+                    {item.alias && (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                        idx === autocompleteIndex ? 'bg-purple-700 text-white' : 'bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-300'
+                      }`}>
+                        alias: {item.alias}
+                      </span>
+                    )}
                   </div>
-                  <span className="text-[10px] opacity-60 font-mono">{p.pageType}</span>
+                  <span className="text-[10px] opacity-60 font-mono shrink-0 ml-1">
+                    {item.alias ? '[[...|...]]' : item.page.pageType}
+                  </span>
                 </div>
               ))}
 
               {autocompleteQuery.trim().length > 0 && !allPages.some((p) => p.title.toLowerCase().trim() === autocompleteQuery.trim().toLowerCase()) && (
                 <div
-                  onClick={() => insertWikiLink(autocompleteQuery.trim(), true)}
+                  onClick={() => insertWikiLink(autocompleteQuery.trim(), undefined, true)}
                   className="px-3 py-2 text-xs flex items-center gap-2 cursor-pointer border-t border-slate-100 dark:border-slate-800 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/50 font-semibold"
                 >
                   <Plus className="w-3.5 h-3.5 text-purple-500" />

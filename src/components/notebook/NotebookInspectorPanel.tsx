@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { Page, BacklinkItem, UnlinkedMentionItem } from '@/types/notebook';
 import { AiConnectionSuggestion, AiConnectionMode, KnowledgeAssistantMessage } from '@/types/ai';
-import { extractWikiLinks } from '@/lib/notebook/links';
+import { extractWikiLinks, getPageAliases } from '@/lib/notebook/links';
 import { queryKnowledgeAssistant, recordAiFeedback } from '@/lib/notebook/knowledgeAiEngine';
 
 interface NotebookInspectorPanelProps {
@@ -69,6 +69,9 @@ export const NotebookInspectorPanel: React.FC<NotebookInspectorPanelProps> = ({
 
   // Extract outgoing links from current page
   const outgoingLinks = React.useMemo(() => extractWikiLinks(page.content), [page.content]);
+
+  // Extract aliases defined for this page
+  const pageAliases = React.useMemo(() => getPageAliases(page), [page]);
 
   // Extract document outline headings
   const outlineHeadings = React.useMemo(() => {
@@ -382,6 +385,29 @@ export const NotebookInspectorPanel: React.FC<NotebookInspectorPanelProps> = ({
                         {b.snippet}
                       </p>
                     </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Page Aliases */}
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+                Page Aliases ({pageAliases.length})
+              </span>
+              {pageAliases.length === 0 ? (
+                <p className="text-xs text-slate-400 italic">
+                  No aliases yet. Add <code className="text-purple-600 dark:text-purple-400 font-mono text-[11px]">aliases: [Alias]</code> in YAML frontmatter.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {pageAliases.map((alias, idx) => (
+                    <span
+                      key={idx}
+                      className="px-2 py-0.5 text-xs font-semibold text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-950/60 rounded-md border border-purple-200 dark:border-purple-800"
+                    >
+                      {alias}
+                    </span>
                   ))}
                 </div>
               )}
