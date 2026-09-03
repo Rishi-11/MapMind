@@ -41,7 +41,6 @@ import {
   deleteVaultById,
   importVaultFromJsonFile,
   reconcileWorkspacePages,
-  ONBOARDING_GUIDE_VAULT,
   INITIAL_STARTER_WORKSPACE,
   VaultMetadata,
 } from '@/lib/notebook/storage';
@@ -835,12 +834,26 @@ export function AppContent() {
   }, [showNotification]);
 
   const handleWipeDeviceData = useCallback(async () => {
+    // 1. Cancel all active timers so nothing writes back to storage
+    cloudSyncTimersRef.current.forEach((t) => clearTimeout(t));
+    cloudSyncTimersRef.current.clear();
+    if (autoPushTimerRef.current) clearTimeout(autoPushTimerRef.current);
+
+    // 2. Clear all in-memory React auth and state
+    setAuthUser(null);
+    setEncryptionKey(null);
+    setAuthVerifier(null);
+    setSyncStatus({ state: 'local_saved', pendingCount: 0, lastSyncedAt: null });
+    setNodes([]);
+    setEdges([]);
+    setIsVaultManagerOpen(false);
+
+    // 3. Exhaustively wipe IndexedDB databases, localStorage, sessionStorage, and cache
     await wipeAllLocalDeviceData();
-    await saveWorkspace(ONBOARDING_GUIDE_VAULT);
-    setWorkspace(ONBOARDING_GUIDE_VAULT);
-    refreshVaultList();
-    showNotification('All local data wiped. Reset to initial guide.', 'info');
-  }, [showNotification, refreshVaultList]);
+
+    // 4. Clean reload to purge runtime memory and reboot clean
+    window.location.reload();
+  }, [setNodes, setEdges]);
 
   const handleImportVaultFile = useCallback(async (file: File) => {
     try {

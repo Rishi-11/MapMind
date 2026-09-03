@@ -1,4 +1,3 @@
-﻿import React from 'react';
 import {
   BookOpen,
   BrainCircuit,
@@ -7,14 +6,12 @@ import {
   CheckSquare,
   LayoutDashboard,
   Search,
-  Sparkles,
   Download,
   FolderOpen,
   Moon,
   Sun,
   ChevronDown,
   FolderArchive,
-  PanelRight,
   Plus,
   Cloud,
   AlertTriangle,
@@ -35,7 +32,7 @@ interface UnifiedHeaderProps {
   isAutoSaving?: boolean;
   isDarkMode: boolean;
   onToggleTheme: () => void;
-  aiMode: string;
+  aiMode?: string;
   onOpenAiSettings?: () => void;
   onConnectLocalFolder?: () => void;
   isInspectorOpen?: boolean;
@@ -57,10 +54,7 @@ export const UnifiedHeader: React.FC<UnifiedHeaderProps> = ({
   isAutoSaving = false,
   isDarkMode,
   onToggleTheme,
-  aiMode,
   onConnectLocalFolder,
-  isInspectorOpen = true,
-  onToggleInspector,
   authUser,
   syncStatus,
   onOpenCloudSync,
@@ -185,16 +179,13 @@ export const UnifiedHeader: React.FC<UnifiedHeaderProps> = ({
           </button>
         )}
 
-        {/* Unified Status Pill: Storage + AI */}
+        {/* Storage Status Pill */}
         <div
           className="hidden xl:flex items-center gap-1.5 px-2 py-0.5 rounded-lg text-[11px] font-medium text-slate-500 dark:text-slate-400 bg-slate-100/50 dark:bg-slate-800/40"
-          title={`Storage: Auto-saved to IndexedDB • AI Connection Mode: ${aiMode}`}
+          title="Storage: Auto-saved to IndexedDB"
         >
           <span className={`w-1.5 h-1.5 rounded-full ${isAutoSaving ? 'bg-amber-400 animate-ping' : 'bg-emerald-500'}`} />
           <span className="text-[10px]">{isAutoSaving ? 'Saving' : 'Saved'}</span>
-          <span className="text-slate-300 dark:text-slate-700">•</span>
-          <Sparkles className="w-3 h-3 text-purple-500" />
-          <span className="text-[10px] capitalize">{aiMode}</span>
         </div>
 
         {/* Utility Action Icons */}
@@ -238,20 +229,6 @@ export const UnifiedHeader: React.FC<UnifiedHeaderProps> = ({
           >
             <Download className="w-4 h-4" />
           </button>
-
-          {currentMode === 'editor' && onToggleInspector && (
-            <button
-              onClick={onToggleInspector}
-              className={`p-1.5 rounded-lg transition-colors ${
-                isInspectorOpen
-                  ? 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/50'
-                  : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
-              title="Toggle Knowledge Inspector (Ctrl+J)"
-            >
-              <PanelRight className="w-4 h-4" />
-            </button>
-          )}
 
           {/* Theme Switcher */}
           <button

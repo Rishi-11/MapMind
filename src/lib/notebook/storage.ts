@@ -955,28 +955,55 @@ export async function exportAllVaultsBackupBundle(): Promise<void> {
 
 /**
  * Completely wipe all local data stored on this machine
- * Clears IndexedDB, localStorage, sessionStorage, and resets to clean state
+ * Clears all IndexedDB databases, localStorage, sessionStorage, CacheStorage, and resets cleanly
  */
 export async function wipeAllLocalDeviceData(): Promise<void> {
-  try {
-    const db = await getDb();
-    await db.clear(STORE_NAME);
-    db.close();
-  } catch (e) {
-    console.warn('Error clearing IndexedDB object store:', e);
+  const knownDbs = ['mapmind_notebook_db', 'mapmind_sync_db'];
+
+  if (typeof window !== 'undefined' && 'indexedDB' in window) {
+    try {
+      if (typeof window.indexedDB.databases === 'function') {
+        const dbs = await window.indexedDB.databases();
+        for (const dbInfo of dbs) {
+          if (dbInfo.name) {
+            try {
+              window.indexedDB.deleteDatabase(dbInfo.name);
+            } catch (err) {
+              console.warn(`Error deleting IndexedDB database ${dbInfo.name}:`, err);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Error querying IndexedDB databases:', e);
+    }
+
+    // Explicit deletion fallback for known DBs
+    for (const dbName of knownDbs) {
+      try {
+        await deleteDB(dbName);
+      } catch (e) {
+        console.warn(`Error deleting DB ${dbName}:`, e);
+      }
+    }
   }
 
   try {
-    await deleteDB(DB_NAME);
-  } catch (e) {
-    console.warn('Error deleting IndexedDB database:', e);
-  }
-
-  try {
-    localStorage.clear();
-    sessionStorage.clear();
+    if (typeof localStorage !== 'undefined') localStorage.clear();
+    if (typeof sessionStorage !== 'undefined') sessionStorage.clear();
   } catch (e) {
     console.warn('Error clearing web storage:', e);
+  }
+
+  try {
+    if (typeof window !== 'undefined' && 'caches' in window) {
+      const keys = await window.caches.keys();
+      for (const k of keys) {
+        await window.caches.delete(k);
+      }
+    }
+  } catch (e) {
+    console.warn('Error clearing cache storage:', e);
   }
 }
 
