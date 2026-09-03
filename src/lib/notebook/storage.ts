@@ -1,5 +1,6 @@
-import { openDB, deleteDB, IDBPDatabase } from 'idb';
+import { openDB, IDBPDatabase } from 'idb';
 import { Workspace, Notebook, Section, Page } from '@/types/notebook';
+import { closeAndWipeSyncDb } from '@/lib/sync/syncQueue';
 
 const DB_NAME = 'mapmind_notebook_db';
 const DB_VERSION = 2;
@@ -16,6 +17,58 @@ export interface VaultMetadata {
   notebookCount: number;
   pageCount: number;
 }
+
+/**
+ * Clean default empty vault for wiped state or fresh users
+ */
+export const CLEAN_BLANK_VAULT: Workspace = {
+  id: 'vault-default',
+  name: 'My Vault',
+  activeNotebookId: 'nb-1',
+  activeSectionId: 'sec-1',
+  activePageId: 'page-1',
+  settings: {
+    defaultPageType: 'note',
+    autoSaveIntervalMs: 1000,
+    aiConnectionMode: 'suggest',
+    aiConfidenceThreshold: 0.65,
+    theme: 'system',
+  },
+  collections: [],
+  notebooks: [
+    {
+      id: 'nb-1',
+      name: 'Notes',
+      icon: '📓',
+      color: '#8b5cf6',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      sections: [
+        {
+          id: 'sec-1',
+          notebookId: 'nb-1',
+          name: 'General',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          pages: [
+            {
+              id: 'page-1',
+              notebookId: 'nb-1',
+              sectionId: 'sec-1',
+              title: 'Welcome Note',
+              pageType: 'note',
+              tags: [],
+              properties: {},
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              content: '# Welcome Note\n\nStart typing your private notes here...',
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
 
 /**
  * The single clean onboarding guide vault that teaches users how to master MapMind
@@ -588,33 +641,37 @@ export function reconcileWorkspacePages(ws: Workspace): { workspace: Workspace; 
     sec.pages.push(page);
   }
 
-  // 4. If user has their own populated notebooks, remove any empty default template notebook
-  const userNotebooks = cloned.notebooks.filter(
-    (n) => n.id !== 'nb-1' && n.sections.some((s) => s.pages.length > 0)
-  );
-  if (userNotebooks.length > 0) {
-    const templateNbIdx = cloned.notebooks.findIndex(
-      (n) => n.id === 'nb-1' && n.sections.every((s) => s.pages.length === 0)
-    );
+  // 4. If user has their own custom notebooks, remove the default placeholder 'Notes' (nb-1) notebook
+  const customNotebooks = cloned.notebooks.filter((n) => n.id !== 'nb-1');
+  if (customNotebooks.length > 0) {
+    const templateNbIdx = cloned.notebooks.findIndex((n) => n.id === 'nb-1');
     if (templateNbIdx >= 0) {
-      cloned.notebooks.splice(templateNbIdx, 1);
-      changed = true;
+      const templateNb = cloned.notebooks[templateNbIdx];
+      const isOnlyStarter =
+        templateNb.sections.length === 0 ||
+        templateNb.sections.every(
+          (s) => s.pages.length === 0 || (s.pages.length === 1 && s.pages[0].id === 'page-1')
+        );
+      if (isOnlyStarter) {
+        cloned.notebooks.splice(templateNbIdx, 1);
+        changed = true;
+      }
     }
   }
 
-  // 5. Ensure valid active selections
-  if (!cloned.notebooks.some((n) => n.id === cloned.activeNotebookId)) {
+  // 5. Ensure valid active selections without hijacking current active note
+  if (!cloned.activeNotebookId || !cloned.notebooks.some((n) => n.id === cloned.activeNotebookId)) {
     cloned.activeNotebookId = cloned.notebooks[0]?.id || null;
     changed = true;
   }
   const activeNb = cloned.notebooks.find((n) => n.id === cloned.activeNotebookId);
   if (activeNb) {
-    if (!activeNb.sections.some((s) => s.id === cloned.activeSectionId)) {
+    if (!cloned.activeSectionId || !activeNb.sections.some((s) => s.id === cloned.activeSectionId)) {
       cloned.activeSectionId = activeNb.sections[0]?.id || null;
       changed = true;
     }
     const activeSec = activeNb.sections.find((s) => s.id === cloned.activeSectionId);
-    if (activeSec && !activeSec.pages.some((p) => p.id === cloned.activePageId)) {
+    if (activeSec && (!cloned.activePageId || !activeSec.pages.some((p) => p.id === cloned.activePageId))) {
       cloned.activePageId = activeSec.pages[0]?.id || null;
       changed = true;
     }
@@ -627,6 +684,16 @@ export function reconcileWorkspacePages(ws: Workspace): { workspace: Workspace; 
  * Load the active vault workspace
  */
 export async function loadWorkspace(): Promise<Workspace> {
+  // If the user just wiped the machine, load a clean blank vault
+  const justWiped = typeof sessionStorage !== 'undefined' && sessionStorage.getItem('mapmind_just_wiped') === 'true';
+  if (justWiped) {
+    try {
+      sessionStorage.removeItem('mapmind_just_wiped');
+    } catch (e) {}
+    await saveWorkspace(CLEAN_BLANK_VAULT);
+    return CLEAN_BLANK_VAULT;
+  }
+
   try {
     const db = await getDb();
     const activeId = (await db.get(STORE_NAME, ACTIVE_VAULT_KEY)) as string | undefined;
@@ -642,11 +709,11 @@ export async function loadWorkspace(): Promise<Workspace> {
       return saved as Workspace;
     }
   } catch (err) {
-    console.warn('Failed to load workspace from IndexedDB, using onboarding guide:', err);
+    console.warn('Failed to load workspace from IndexedDB, using clean default vault:', err);
   }
 
-  await saveWorkspace(ONBOARDING_GUIDE_VAULT);
-  return ONBOARDING_GUIDE_VAULT;
+  await saveWorkspace(CLEAN_BLANK_VAULT);
+  return CLEAN_BLANK_VAULT;
 }
 
 /**
@@ -960,50 +1027,76 @@ export async function exportAllVaultsBackupBundle(): Promise<void> {
 export async function wipeAllLocalDeviceData(): Promise<void> {
   const knownDbs = ['mapmind_notebook_db', 'mapmind_sync_db'];
 
-  if (typeof window !== 'undefined' && 'indexedDB' in window) {
+  if (typeof window !== 'undefined') {
+    // 1. Close persistent sync db connection handle
+    await closeAndWipeSyncDb();
+
+    // 2. Clear known object stores
     try {
-      if (typeof window.indexedDB.databases === 'function') {
-        const dbs = await window.indexedDB.databases();
-        for (const dbInfo of dbs) {
-          if (dbInfo.name) {
-            try {
-              window.indexedDB.deleteDatabase(dbInfo.name);
-            } catch (err) {
-              console.warn(`Error deleting IndexedDB database ${dbInfo.name}:`, err);
+      const db = await openDB(DB_NAME, DB_VERSION);
+      for (const store of db.objectStoreNames) {
+        try {
+          await db.clear(store);
+        } catch (e) {}
+      }
+      db.close();
+    } catch (e) {}
+
+    try {
+      const sDb = await openDB('mapmind_sync_db', 1);
+      for (const store of sDb.objectStoreNames) {
+        try {
+          await sDb.clear(store);
+        } catch (e) {}
+      }
+      sDb.close();
+    } catch (e) {}
+
+    // 3. Delete all IndexedDB databases
+    try {
+      if ('indexedDB' in window) {
+        if (typeof window.indexedDB.databases === 'function') {
+          const dbs = await window.indexedDB.databases();
+          for (const dbInfo of dbs) {
+            if (dbInfo.name) {
+              try {
+                window.indexedDB.deleteDatabase(dbInfo.name);
+              } catch (err) {}
             }
           }
+        }
+        for (const dbName of knownDbs) {
+          try {
+            window.indexedDB.deleteDatabase(dbName);
+          } catch (e) {}
         }
       }
     } catch (e) {
       console.warn('Error querying IndexedDB databases:', e);
     }
 
-    // Explicit deletion fallback for known DBs
-    for (const dbName of knownDbs) {
-      try {
-        await deleteDB(dbName);
-      } catch (e) {
-        console.warn(`Error deleting DB ${dbName}:`, e);
+    // 4. Clear LocalStorage and SessionStorage
+    try {
+      if (typeof localStorage !== 'undefined') localStorage.clear();
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.clear();
+        sessionStorage.setItem('mapmind_just_wiped', 'true');
       }
+    } catch (e) {
+      console.warn('Error clearing web storage:', e);
     }
-  }
 
-  try {
-    if (typeof localStorage !== 'undefined') localStorage.clear();
-    if (typeof sessionStorage !== 'undefined') sessionStorage.clear();
-  } catch (e) {
-    console.warn('Error clearing web storage:', e);
-  }
-
-  try {
-    if (typeof window !== 'undefined' && 'caches' in window) {
-      const keys = await window.caches.keys();
-      for (const k of keys) {
-        await window.caches.delete(k);
+    // 5. Clear Cache Storage
+    try {
+      if ('caches' in window) {
+        const keys = await window.caches.keys();
+        for (const k of keys) {
+          await window.caches.delete(k);
+        }
       }
+    } catch (e) {
+      console.warn('Error clearing cache storage:', e);
     }
-  } catch (e) {
-    console.warn('Error clearing cache storage:', e);
   }
 }
 

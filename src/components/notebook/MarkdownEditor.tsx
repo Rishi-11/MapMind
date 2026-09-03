@@ -41,8 +41,6 @@ interface MarkdownEditorProps {
   onNavigateToPage: (pageTitle: string) => void;
   onOpenMindMapForPage: (page: Page) => void;
   onGenerateStudyDeck: (page: Page) => void;
-  aiSuggestionsCount?: number;
-  onOpenAiInspector?: () => void;
 }
 
 type EditorViewMode = 'preview' | 'split' | 'source';
@@ -56,8 +54,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   onNavigateToPage,
   onOpenMindMapForPage,
   onGenerateStudyDeck,
-  aiSuggestionsCount = 0,
-  onOpenAiInspector,
 }) => {
   const [viewMode, setViewMode] = useState<EditorViewMode>('split');
   const [title, setTitle] = useState(page.title);
@@ -95,24 +91,23 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     setContent(newContent);
     setIsSaving(true);
 
-    // Auto-sync page title if the user writes or updates "# Heading" in the markdown
-    const firstHeadingMatch = newContent.match(/(?:^|\n)#\s+([^\n#]+)/);
-    if (firstHeadingMatch) {
-      const extractedTitle = firstHeadingMatch[1].trim();
-      if (extractedTitle && extractedTitle !== title) {
-        setTitle(extractedTitle);
-        onUpdateTitle(page.id, extractedTitle);
-      }
-    }
-
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
     }
 
     saveTimeoutRef.current = setTimeout(() => {
+      // Auto-sync page title if the user writes or updates "# Heading" in the markdown
+      const firstHeadingMatch = newContent.match(/(?:^|\n)#\s+([^\n#]+)/);
+      if (firstHeadingMatch) {
+        const extractedTitle = firstHeadingMatch[1].trim();
+        if (extractedTitle && extractedTitle !== title) {
+          setTitle(extractedTitle);
+          onUpdateTitle(page.id, extractedTitle);
+        }
+      }
       onUpdateContent(page.id, newContent);
       setIsSaving(false);
-    }, 400);
+    }, 350);
 
     // Check for wiki-link trigger "[["
     if (textareaRef.current) {
@@ -939,24 +934,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
 
         {/* Right Tools: View Mode Switcher + Mind Map Generator Action */}
         <div className="flex items-center gap-1.5 shrink-0">
-          {onOpenAiInspector && (
-            <button
-              onClick={onOpenAiInspector}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
-                (aiSuggestionsCount || 0) > 0
-                  ? 'bg-purple-100 hover:bg-purple-200 dark:bg-purple-950/70 dark:hover:bg-purple-900 text-purple-700 dark:text-purple-300 border border-purple-300/80 dark:border-purple-700 shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
-              title="Open AI Knowledge Assistant & Suggested Connections (Ctrl+J)"
-            >
-              <Sparkles className={`w-3.5 h-3.5 ${(aiSuggestionsCount || 0) > 0 ? 'text-purple-600 dark:text-purple-400 animate-pulse' : 'text-slate-400'}`} />
-              <span className="hidden sm:inline">
-                {(aiSuggestionsCount || 0) > 0
-                  ? `${aiSuggestionsCount} AI Connection${aiSuggestionsCount > 1 ? 's' : ''}`
-                  : 'AI Inspector'}
-              </span>
-            </button>
-          )}
 
           <button
             onClick={() => onOpenMindMapForPage(page)}

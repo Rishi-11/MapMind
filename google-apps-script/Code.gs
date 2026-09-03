@@ -97,29 +97,68 @@ function doGet(e) {
   });
 }
 
+function getSpreadsheet() {
+  let ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) {
+    try {
+      const props = PropertiesService.getScriptProperties();
+      const sheetId = props.getProperty('SPREADSHEET_ID');
+      if (sheetId) {
+        ss = SpreadsheetApp.openById(sheetId);
+      }
+    } catch (e) {
+      Logger.log('Error opening spreadsheet by ID: ' + e);
+    }
+  }
+  return ss;
+}
+
 /**
  * Handle incoming API requests from MapMind Web App
  */
 function doPost(e) {
-  const lock = LockService.getScriptLock();
+  let lock;
   try {
-    // Acquire lock for 30s to prevent concurrent row corruption
+    lock = LockService.getScriptLock();
+    // Acquire lock for up to 30s
     lock.waitLock(30000);
+  } catch (lockErr) {
+    Logger.log('Could not acquire lock: ' + lockErr);
+  }
 
+  try {
     if (!e || !e.postData || !e.postData.contents) {
-      return jsonResponse({ success: false, error: 'EMPTY_REQUEST_BODY' }, 400);
+      return jsonResponse({ success: false, error: 'EMPTY_REQUEST_BODY' });
     }
 
     let request;
     try {
       request = JSON.parse(e.postData.contents);
     } catch (parseErr) {
-      return jsonResponse({ success: false, error: 'INVALID_JSON' }, 400);
+      return jsonResponse({ success: false, error: 'INVALID_JSON', details: parseErr.toString() });
     }
 
     const action = request.action;
     const payload = request.payload || {};
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    if (action === 'ping') {
+      const ss = getSpreadsheet();
+      return jsonResponse({
+        success: true,
+        serverTime: new Date().toISOString(),
+        schemaVersion: SCHEMA_VERSION,
+        hasSpreadsheet: Boolean(ss),
+      });
+    }
+
+    const ss = getSpreadsheet();
+    if (!ss) {
+      return jsonResponse({
+        success: false,
+        error: 'SPREADSHEET_NOT_FOUND',
+        message: 'Google Apps Script is not attached to a Google Sheet. Please open your Google Sheet, click "Extensions -> Apps Script", paste this script, and click "Deploy -> New deployment".',
+      });
+    }
 
     // Auto-heal database schema if sheets are missing
     if (!ss.getSheetByName('Users') || !ss.getSheetByName('Notebooks') || !ss.getSheetByName('Pages')) {
@@ -128,17 +167,10 @@ function doPost(e) {
 
     // Check rate limit
     if (payload.userId && isRateLimited(payload.userId)) {
-      return jsonResponse({ success: false, error: 'RATE_LIMIT_EXCEEDED' }, 429);
+      return jsonResponse({ success: false, error: 'RATE_LIMIT_EXCEEDED' });
     }
 
     switch (action) {
-      case 'ping':
-        return jsonResponse({
-          success: true,
-          serverTime: new Date().toISOString(),
-          schemaVersion: SCHEMA_VERSION,
-        });
-
       case 'register':
         return handleRegister(ss, payload);
 
@@ -155,13 +187,17 @@ function doPost(e) {
         return handleSync(ss, payload);
 
       default:
-        return jsonResponse({ success: false, error: 'UNKNOWN_ACTION: ' + action }, 400);
+        return jsonResponse({ success: false, error: 'UNKNOWN_ACTION: ' + action });
     }
   } catch (err) {
     Logger.log('Error in doPost: ' + err.toString());
-    return jsonResponse({ success: false, error: 'SERVER_ERROR', message: err.toString() }, 500);
+    return jsonResponse({ success: false, error: 'SERVER_ERROR', message: err.toString() });
   } finally {
-    lock.releaseLock();
+    if (lock) {
+      try {
+        lock.releaseLock();
+      } catch (e) {}
+    }
   }
 }
 

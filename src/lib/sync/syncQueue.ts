@@ -166,3 +166,16 @@ export async function clearSyncQueue(): Promise<void> {
   const db = await getSyncDb();
   await db.clear(QUEUE_STORE);
 }
+
+/**
+ * Explicitly close and release the sync database connection handle
+ */
+export async function closeAndWipeSyncDb(): Promise<void> {
+  if (syncDbPromise) {
+    try {
+      const db = await syncDbPromise;
+      db.close();
+    } catch (e) {}
+    syncDbPromise = null;
+  }
+}

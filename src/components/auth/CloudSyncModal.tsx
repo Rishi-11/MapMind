@@ -36,6 +36,7 @@ interface CloudSyncModalProps {
   onUserLoggedOut: () => void;
   onTriggerManualSync: () => void;
   onPushAllToCloud?: () => Promise<void>;
+  onRestoreVaultFromCloud?: () => Promise<void>;
   onClearSyncQueue?: () => Promise<void>;
   onRecoverFromBackup: (file: File, newPassword: string) => Promise<void>;
 }
@@ -50,6 +51,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   onUserLoggedOut,
   onTriggerManualSync,
   onPushAllToCloud,
+  onRestoreVaultFromCloud,
   onClearSyncQueue,
   onRecoverFromBackup,
 }) => {
@@ -510,6 +512,19 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                       >
                         <Cloud className="w-3.5 h-3.5" />
                         <span>Force Full Vault Backup (All Hierarchy)</span>
+                      </button>
+                    )}
+
+                    {onRestoreVaultFromCloud && (
+                      <button
+                        type="button"
+                        onClick={onRestoreVaultFromCloud}
+                        disabled={syncStatus.state === 'syncing'}
+                        className="w-full py-2 rounded-xl text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                        title="Download and cleanly restore your complete cloud vault without mixing with local starter files"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span>Restore / Fetch Full Vault from Cloud</span>
                       </button>
                     )}
                   </div>

@@ -307,13 +307,13 @@ export function AppContent() {
           const pending = await getPendingSyncOperations(authUser.userId);
           setSyncStatus((s) => ({ ...s, pendingCount: pending.length, state: 'local_saved' }));
 
-          // ⚡ Automatically stream/push changes to cloud in background after 1.2s debounce
+          // ⚡ Automatically stream/push changes to cloud in background after 4.5s idle pause
           if (autoPushTimerRef.current) clearTimeout(autoPushTimerRef.current);
           autoPushTimerRef.current = setTimeout(() => {
             if (navigator.onLine && authUser && encryptionKey && authVerifier) {
               handlePerformCloudSync(true); // silent auto-push
             }
-          }, 1200);
+          }, 4500);
         } catch (err) {
           console.warn('Failed to queue encrypted cloud sync operation:', err);
         } finally {
@@ -468,57 +468,64 @@ export function AppContent() {
         }
 
         // Merge cloud notebooks
+        const hasCustomLocalNotebooks = updatedWorkspace.notebooks.some((n) => n.id !== 'nb-1');
+
         for (const cloudNb of cloudRes.notebooks) {
-          if (!cloudNb.deleted && cloudNb.encrypted_metadata) {
-            try {
-              const decryptedNb = await decryptData<Notebook>(
-                JSON.parse(cloudNb.encrypted_metadata),
-                encryptionKey
-              );
-              const idx = updatedWorkspace.notebooks.findIndex((n) => n.id === decryptedNb.id);
-              if (idx >= 0) {
-                // Merge notebook metadata and sections while preserving existing local pages
-                const existingNb = updatedWorkspace.notebooks[idx];
-                const existingSectionsMap = new Map(existingNb.sections.map((s) => [s.id, s]));
+          if (cloudNb.notebook_id === 'vault_master_backup' || cloudNb.deleted || !cloudNb.encrypted_metadata) {
+            continue;
+          }
+          if (cloudNb.notebook_id === 'nb-1' && hasCustomLocalNotebooks) {
+            continue;
+          }
 
-                const mergedSections: Section[] = decryptedNb.sections.map((cloudSec) => {
-                  const localSec = existingSectionsMap.get(cloudSec.id);
-                  return {
-                    ...cloudSec,
-                    pages: localSec?.pages && localSec.pages.length > 0 ? localSec.pages : (cloudSec.pages || []),
-                  };
-                });
+          try {
+            const decryptedNb = await decryptData<Notebook>(
+              JSON.parse(cloudNb.encrypted_metadata),
+              encryptionKey
+            );
+            const idx = updatedWorkspace.notebooks.findIndex((n) => n.id === decryptedNb.id);
+            if (idx >= 0) {
+              // Merge notebook metadata and sections while preserving existing local pages
+              const existingNb = updatedWorkspace.notebooks[idx];
+              const existingSectionsMap = new Map(existingNb.sections.map((s) => [s.id, s]));
 
-                // Also keep any local sections that weren't in cloud yet
-                for (const localSec of existingNb.sections) {
-                  if (!mergedSections.some((s) => s.id === localSec.id)) {
-                    mergedSections.push(localSec);
-                  }
-                }
-
-                updatedWorkspace.notebooks[idx] = {
-                  ...decryptedNb,
-                  sections: mergedSections,
-                  updatedAt:
-                    new Date(decryptedNb.updatedAt).getTime() > new Date(existingNb.updatedAt).getTime()
-                      ? decryptedNb.updatedAt
-                      : existingNb.updatedAt,
+              const mergedSections: Section[] = decryptedNb.sections.map((cloudSec) => {
+                const localSec = existingSectionsMap.get(cloudSec.id);
+                return {
+                  ...cloudSec,
+                  pages: localSec?.pages && localSec.pages.length > 0 ? localSec.pages : (cloudSec.pages || []),
                 };
-                hasNewData = true;
-              } else {
-                updatedWorkspace.notebooks.push({
-                  ...decryptedNb,
-                  sections: decryptedNb.sections || [],
-                });
-                hasNewData = true;
+              });
+
+              // Also keep any local sections that weren't in cloud yet
+              for (const localSec of existingNb.sections) {
+                if (!mergedSections.some((s) => s.id === localSec.id)) {
+                  mergedSections.push(localSec);
+                }
               }
-            } catch (nbErr) {
-              console.warn('Error decrypting cloud notebook:', nbErr);
+
+              updatedWorkspace.notebooks[idx] = {
+                ...decryptedNb,
+                sections: mergedSections,
+                updatedAt:
+                  new Date(decryptedNb.updatedAt).getTime() > new Date(existingNb.updatedAt).getTime()
+                    ? decryptedNb.updatedAt
+                    : existingNb.updatedAt,
+              };
+              hasNewData = true;
+            } else {
+              updatedWorkspace.notebooks.push({
+                ...decryptedNb,
+                sections: decryptedNb.sections || [],
+              });
+              hasNewData = true;
             }
+          } catch (nbErr) {
+            console.warn('Error decrypting cloud notebook:', nbErr);
           }
         }
 
-        // Merge cloud pages with strict hierarchy preservation (never dump into notebook 0)
+        // Merge cloud pages with strict hierarchy preservation
         for (const cloudPg of cloudRes.pages) {
           if (!cloudPg.deleted && cloudPg.encrypted_content) {
             try {
@@ -533,10 +540,9 @@ export function AppContent() {
                 );
               }
               if (!targetNb) {
-                // Auto-create the Notebook by its original ID to preserve hierarchy
                 targetNb = {
                   id: decryptedPage.notebookId || `nb-${Date.now()}`,
-                  name: 'My Notebook',
+                  name: 'Notebook',
                   icon: '📓',
                   color: '#8b5cf6',
                   createdAt: decryptedPage.createdAt || new Date().toISOString(),
@@ -550,7 +556,6 @@ export function AppContent() {
               // 2. Locate target section by decryptedPage.sectionId within targetNb
               let targetSec = targetNb.sections.find((s) => s.id === decryptedPage.sectionId);
               if (!targetSec) {
-                // Auto-create Section by its original ID to preserve hierarchy
                 targetSec = {
                   id: decryptedPage.sectionId || `sec-${Date.now()}`,
                   notebookId: targetNb.id,
@@ -592,10 +597,26 @@ export function AppContent() {
           }
         }
 
-        // Clean & Reconcile
+        // Clean & Reconcile while strictly preserving user's current active note
+        const currentActiveNbId = workspace.activeNotebookId;
+        const currentActiveSecId = workspace.activeSectionId;
+        const currentActivePgId = workspace.activePageId;
+
         const reconciled = reconcileWorkspacePages(updatedWorkspace);
         if (reconciled.changed || hasNewData) {
           updatedWorkspace = reconciled.workspace;
+          // Keep user on the note they are actively editing
+          if (currentActiveNbId && updatedWorkspace.notebooks.some((n) => n.id === currentActiveNbId)) {
+            updatedWorkspace.activeNotebookId = currentActiveNbId;
+            const curNb = updatedWorkspace.notebooks.find((n) => n.id === currentActiveNbId);
+            if (currentActiveSecId && curNb?.sections.some((s) => s.id === currentActiveSecId)) {
+              updatedWorkspace.activeSectionId = currentActiveSecId;
+              const curSec = curNb.sections.find((s) => s.id === currentActiveSecId);
+              if (currentActivePgId && curSec?.pages.some((p) => p.id === currentActivePgId)) {
+                updatedWorkspace.activePageId = currentActivePgId;
+              }
+            }
+          }
           setWorkspace(updatedWorkspace);
           await saveWorkspace(updatedWorkspace);
         }
@@ -633,7 +654,7 @@ export function AppContent() {
     return () => clearInterval(interval);
   }, [authUser, encryptionKey, authVerifier, handlePerformCloudSync]);
 
-  // One-click full vault backup to cloud (pushes all notebooks, sections, and notes with 100% hierarchy)
+  // One-click full vault backup to cloud (pushes master vault snapshot + all notebooks & notes with 100% hierarchy)
   const handlePushAllToCloud = useCallback(async () => {
     if (!authUser || !encryptionKey || !authVerifier) {
       setIsCloudSyncModalOpen(true);
@@ -651,6 +672,21 @@ export function AppContent() {
       const ops: SyncQueueItem[] = [];
       const now = new Date().toISOString();
 
+      // 1. Master Vault Snapshot (stores the complete active workspace tree atomically)
+      const encWorkspace = await encryptData(workspace, encryptionKey);
+      ops.push({
+        requestId: generateSecureId('req'),
+        userId: authUser.userId,
+        deviceId: authUser.deviceId,
+        operation: 'CREATE_NOTEBOOK',
+        objectId: 'vault_master_backup',
+        baseVersion: 1,
+        timestamp: now,
+        encryptedPayload: JSON.stringify(encWorkspace),
+        retries: 0,
+      });
+
+      // 2. Individual Notebooks and Pages
       for (const nb of workspace.notebooks) {
         const encNb = await encryptData(nb, encryptionKey);
         ops.push({
@@ -699,18 +735,176 @@ export function AppContent() {
         }
       }
 
+      const totalNotes = workspace.notebooks.reduce(
+        (acc, nb) => acc + nb.sections.reduce((sAcc, s) => sAcc + s.pages.length, 0),
+        0
+      );
       setSyncStatus({
         state: 'cloud_saved',
         pendingCount: 0,
         lastSyncedAt: new Date().toLocaleTimeString(),
       });
-      showNotification('✅ Entire vault backed up to cloud with 100% hierarchy!', 'success');
+      showNotification(`✅ Backed up complete vault "${workspace.name}" (${workspace.notebooks.length} notebooks, ${totalNotes} notes) to cloud!`, 'success');
     } catch (err: any) {
       console.warn('Vault backup error:', err);
       showNotification(`Vault backup failed: ${err.message}`, 'error');
       setSyncStatus((s) => ({ ...s, state: 'error' }));
     }
   }, [authUser, encryptionKey, authVerifier, workspace, showNotification]);
+
+  // One-click restore entire vault from cloud (mirrors cloud state cleanly with 100% hierarchy)
+  const handleRestoreVaultFromCloud = useCallback(async () => {
+    if (!authUser || !encryptionKey || !authVerifier) {
+      setIsCloudSyncModalOpen(true);
+      return;
+    }
+    if (!navigator.onLine) {
+      showNotification('Cannot restore from cloud while offline.', 'error');
+      return;
+    }
+
+    setSyncStatus((s) => ({ ...s, state: 'syncing' }));
+    showNotification('📥 Fetching complete vault from cloud...', 'info');
+
+    try {
+      const cloudRes = await fetchUserCloudChanges(
+        authUser.appsScriptUrl,
+        authUser.userId,
+        authVerifier
+      );
+
+      if (!cloudRes.success) {
+        throw new Error(cloudRes.error || 'Failed to fetch vault from Google Sheets.');
+      }
+
+      // Check if master vault snapshot exists
+      const masterRecord = cloudRes.notebooks?.find(
+        (n) => n.notebook_id === 'vault_master_backup' && !n.deleted && n.encrypted_metadata
+      );
+
+      if (masterRecord) {
+        try {
+          const restoredWs = await decryptData<Workspace>(
+            JSON.parse(masterRecord.encrypted_metadata),
+            encryptionKey
+          );
+          if (restoredWs && restoredWs.notebooks && restoredWs.notebooks.length > 0) {
+            const reconciled = reconcileWorkspacePages(restoredWs);
+            setWorkspace(reconciled.workspace);
+            await saveWorkspace(reconciled.workspace);
+            refreshVaultList();
+            setSyncStatus({
+              state: 'cloud_saved',
+              pendingCount: 0,
+              lastSyncedAt: new Date().toLocaleTimeString(),
+            });
+            showNotification(`✅ Restored complete vault "${reconciled.workspace.name}" from cloud!`, 'success');
+            return;
+          }
+        } catch (e) {
+          console.warn('Could not decrypt master snapshot, falling back to granular restore:', e);
+        }
+      }
+
+      // Granular reconstruction from notebooks and pages
+      const restoredNotebooks: Notebook[] = [];
+
+      for (const cloudNb of cloudRes.notebooks || []) {
+        if (cloudNb.notebook_id === 'vault_master_backup' || cloudNb.deleted || !cloudNb.encrypted_metadata) continue;
+        try {
+          const decryptedNb = await decryptData<Notebook>(
+            JSON.parse(cloudNb.encrypted_metadata),
+            encryptionKey
+          );
+          restoredNotebooks.push({
+            ...decryptedNb,
+            sections: (decryptedNb.sections || []).map((sec) => ({
+              ...sec,
+              pages: [],
+            })),
+          });
+        } catch (e) {
+          console.warn('Error decrypting cloud notebook:', e);
+        }
+      }
+
+      // Distribute pages
+      for (const cloudPg of cloudRes.pages || []) {
+        if (cloudPg.deleted || !cloudPg.encrypted_content) continue;
+        try {
+          const decryptedPg = await decryptData<Page>(
+            JSON.parse(cloudPg.encrypted_content),
+            encryptionKey
+          );
+
+          let targetNb = restoredNotebooks.find((n) => n.id === decryptedPg.notebookId);
+          if (!targetNb) {
+            targetNb = {
+              id: decryptedPg.notebookId || `nb-${Date.now()}`,
+              name: 'My Notebook',
+              icon: '📓',
+              color: '#8b5cf6',
+              createdAt: decryptedPg.createdAt || new Date().toISOString(),
+              updatedAt: decryptedPg.updatedAt || new Date().toISOString(),
+              sections: [],
+            };
+            restoredNotebooks.push(targetNb);
+          }
+
+          let targetSec = targetNb.sections.find((s) => s.id === decryptedPg.sectionId);
+          if (!targetSec) {
+            targetSec = {
+              id: decryptedPg.sectionId || `sec-${Date.now()}`,
+              notebookId: targetNb.id,
+              name: 'General',
+              createdAt: decryptedPg.createdAt || new Date().toISOString(),
+              updatedAt: decryptedPg.updatedAt || new Date().toISOString(),
+              pages: [],
+            };
+            targetNb.sections.push(targetSec);
+          }
+
+          if (!targetSec.pages.some((p) => p.id === decryptedPg.id)) {
+            targetSec.pages.push(decryptedPg);
+          }
+        } catch (e) {
+          console.warn('Error decrypting cloud page:', e);
+        }
+      }
+
+      if (restoredNotebooks.length === 0) {
+        showNotification('No cloud notes found for your account on this sheet.', 'info');
+        setSyncStatus({ state: 'cloud_saved', pendingCount: 0, lastSyncedAt: new Date().toLocaleTimeString() });
+        return;
+      }
+
+      const cleanWorkspace: Workspace = {
+        id: workspace.id || `vault-${Date.now()}`,
+        name: workspace.name || 'My Vault',
+        activeNotebookId: restoredNotebooks[0]?.id || null,
+        activeSectionId: restoredNotebooks[0]?.sections[0]?.id || null,
+        activePageId: restoredNotebooks[0]?.sections[0]?.pages[0]?.id || null,
+        settings: workspace.settings,
+        collections: workspace.collections || [],
+        notebooks: restoredNotebooks,
+      };
+
+      const reconciled = reconcileWorkspacePages(cleanWorkspace);
+      setWorkspace(reconciled.workspace);
+      await saveWorkspace(reconciled.workspace);
+      refreshVaultList();
+      setSyncStatus({
+        state: 'cloud_saved',
+        pendingCount: 0,
+        lastSyncedAt: new Date().toLocaleTimeString(),
+      });
+      showNotification(`✅ Successfully restored vault from cloud with ${restoredNotebooks.length} notebooks!`, 'success');
+    } catch (err: any) {
+      console.warn('Restore error:', err);
+      showNotification(`Failed to restore vault from cloud: ${err.message}`, 'error');
+      setSyncStatus((s) => ({ ...s, state: 'error' }));
+    }
+  }, [authUser, encryptionKey, authVerifier, workspace, refreshVaultList, showNotification]);
 
   // Clear pending sync queue manually
   const handleClearSyncQueue = useCallback(async () => {
@@ -851,8 +1045,10 @@ export function AppContent() {
     // 3. Exhaustively wipe IndexedDB databases, localStorage, sessionStorage, and cache
     await wipeAllLocalDeviceData();
 
-    // 4. Clean reload to purge runtime memory and reboot clean
-    window.location.reload();
+    // 4. Clean reload with slight delay to ensure browser disk operations complete
+    setTimeout(() => {
+      window.location.href = window.location.origin + window.location.pathname;
+    }, 150);
   }, [setNodes, setEdges]);
 
   const handleImportVaultFile = useCallback(async (file: File) => {
@@ -1008,9 +1204,14 @@ export function AppContent() {
         ],
       };
 
+      const isOnlyStarter =
+        workspace.notebooks.length === 1 &&
+        workspace.notebooks[0].id === 'nb-1';
+      const existingNotebooks = isOnlyStarter ? [] : workspace.notebooks;
+
       persistWorkspace({
         ...workspace,
-        notebooks: [...workspace.notebooks, newNb],
+        notebooks: [...existingNotebooks, newNb],
         activeNotebookId: newNb.id,
         activeSectionId: newNb.sections[0].id,
         activePageId: newNb.sections[0].pages[0].id,
@@ -1029,13 +1230,29 @@ export function AppContent() {
   const handleCreateSection = useCallback(
     (notebookId: string, name: string) => {
       if (!workspace) return;
+      const secId = `sec-${Date.now()}`;
+      const pageId = `page-${Date.now()}`;
+
+      const newPage: Page = {
+        id: pageId,
+        notebookId,
+        sectionId: secId,
+        title: 'Untitled Note',
+        pageType: 'note',
+        tags: [],
+        properties: {},
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        content: `# ${name}\n\n`,
+      };
+
       const newSec: Section = {
-        id: `sec-${Date.now()}`,
+        id: secId,
         notebookId,
         name,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        pages: [],
+        pages: [newPage],
       };
 
       const updatedNotebooks = workspace.notebooks.map((nb) =>
@@ -1044,11 +1261,18 @@ export function AppContent() {
           : nb
       );
 
-      persistWorkspace({ ...workspace, notebooks: updatedNotebooks, activeSectionId: newSec.id });
+      persistWorkspace({
+        ...workspace,
+        notebooks: updatedNotebooks,
+        activeNotebookId: notebookId,
+        activeSectionId: newSec.id,
+        activePageId: newPage.id,
+      });
 
       const updatedNb = updatedNotebooks.find((nb) => nb.id === notebookId);
       if (updatedNb) {
         queueCloudSyncOperation('UPDATE_NOTEBOOK', notebookId, updatedNb);
+        queueCloudSyncOperation('CREATE_PAGE', newPage.id, newPage, 1);
       }
 
       showNotification(`Added section "${name}"`, 'success');
@@ -1917,8 +2141,6 @@ export function AppContent() {
                 onNavigateToPage={handleNavigateToPage}
                 onOpenMindMapForPage={handleOpenMindMapForPage}
                 onGenerateStudyDeck={() => setViewMode('study')}
-                aiSuggestionsCount={aiSuggestions.length}
-                onOpenAiInspector={() => setIsInspectorCollapsed(false)}
               />
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-400 bg-white dark:bg-slate-950">
@@ -2396,6 +2618,7 @@ export function AppContent() {
         }}
         onTriggerManualSync={handlePerformCloudSync}
         onPushAllToCloud={handlePushAllToCloud}
+        onRestoreVaultFromCloud={handleRestoreVaultFromCloud}
         onClearSyncQueue={handleClearSyncQueue}
         onRecoverFromBackup={handleRecoverFromBackup}
       />

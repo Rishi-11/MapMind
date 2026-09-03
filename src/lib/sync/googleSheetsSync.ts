@@ -76,8 +76,13 @@ async function callAppsScriptApi<T = any>(rawUrl: string, action: string, payloa
     const data = await response.json();
     return data as T;
   } catch (err: any) {
-    if (err.name === 'TypeError' || err.message?.includes('fetch') || !navigator.onLine) {
-      throw new Error('NETWORK_OFFLINE: Could not reach Google Apps Script server.');
+    if (!navigator.onLine) {
+      throw new Error('OFFLINE: Your device is currently offline.');
+    }
+    if (err.name === 'TypeError' || err.message?.includes('fetch')) {
+      throw new Error(
+        'CONNECTION_FAILED: Could not reach Google Apps Script. Please verify in Apps Script: "Deploy -> Manage deployments -> Edit -> set "Who has access" to "Anyone" -> Deploy new version".'
+      );
     }
     throw err;
   }
@@ -92,7 +97,7 @@ export async function testAppsScriptEndpoint(url: string): Promise<{ success: bo
     if (res.success) {
       return { success: true, schemaVersion: res.schemaVersion };
     }
-    return { success: false, error: res.error || 'PING_FAILED' };
+    return { success: false, error: res.message || res.error || 'PING_FAILED' };
   } catch (err: any) {
     return { success: false, error: err.message || 'CONNECTION_ERROR' };
   }
