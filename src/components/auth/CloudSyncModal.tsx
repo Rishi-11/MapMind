@@ -35,6 +35,7 @@ interface CloudSyncModalProps {
   onUserAuthenticated: (user: AuthUser, key: CryptoKey, authVerifier: string) => void;
   onUserLoggedOut: () => void;
   onTriggerManualSync: () => void;
+  onPushAllToCloud?: () => Promise<void>;
   onClearSyncQueue?: () => Promise<void>;
   onRecoverFromBackup: (file: File, newPassword: string) => Promise<void>;
 }
@@ -48,6 +49,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   onUserAuthenticated,
   onUserLoggedOut,
   onTriggerManualSync,
+  onPushAllToCloud,
   onClearSyncQueue,
   onRecoverFromBackup,
 }) => {
@@ -488,14 +490,29 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                   </div>
 
                   {/* Manual Sync Button */}
-                  <button
-                    onClick={onTriggerManualSync}
-                    disabled={syncStatus.state === 'syncing'}
-                    className="w-full py-2.5 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white shadow-xs transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${syncStatus.state === 'syncing' ? 'animate-spin' : ''}`} />
-                    <span>{syncStatus.state === 'syncing' ? 'Encrypting & Syncing...' : 'Sync Cloud Now'}</span>
-                  </button>
+                  <div className="space-y-2">
+                    <button
+                      onClick={onTriggerManualSync}
+                      disabled={syncStatus.state === 'syncing'}
+                      className="w-full py-2.5 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white shadow-xs transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${syncStatus.state === 'syncing' ? 'animate-spin' : ''}`} />
+                      <span>{syncStatus.state === 'syncing' ? 'Encrypting & Syncing...' : 'Sync Cloud Changes'}</span>
+                    </button>
+
+                    {onPushAllToCloud && (
+                      <button
+                        type="button"
+                        onClick={onPushAllToCloud}
+                        disabled={syncStatus.state === 'syncing'}
+                        className="w-full py-2 rounded-xl text-xs font-semibold bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                        title="Upload all local notebooks, sections, and notes to cloud database"
+                      >
+                        <Cloud className="w-3.5 h-3.5" />
+                        <span>Force Full Vault Backup (All Hierarchy)</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
               ) : (
                 /* Login / Register Form */

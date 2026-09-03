@@ -522,7 +522,8 @@ export async function listAllVaults(): Promise<VaultMetadata[]> {
  * Automatically clean and reconcile pages across notebook sections:
  * - Ensures each page is placed in its rightful notebook and section based on notebookId and sectionId.
  * - Deduplicates any accidental duplicate page entries by retaining the newest updated version.
- * - Prevents misplaced pages from getting dumped into the first section.
+ * - Restores missing notebooks and sections by their original IDs to prevent any hierarchy destruction.
+ * - Prunes empty default template notebooks when user's custom notebooks are present.
  */
 export function reconcileWorkspacePages(ws: Workspace): { workspace: Workspace; changed: boolean } {
   let changed = false;
@@ -544,7 +545,7 @@ export function reconcileWorkspacePages(ws: Workspace): { workspace: Workspace; 
     }
   }
 
-  // 2. Clear pages from all sections
+  // 2. Clear pages from all sections in preparation for clean distribution
   for (const nb of cloned.notebooks) {
     for (const sec of nb.sections) {
       sec.pages = [];
@@ -553,26 +554,69 @@ export function reconcileWorkspacePages(ws: Workspace): { workspace: Workspace; 
 
   // 3. Assign each unique page back to its exact notebook and section
   for (const page of pageMap.values()) {
+    // Find or restore notebook
     let nb = cloned.notebooks.find((n) => n.id === page.notebookId);
     if (!nb) {
-      nb = cloned.notebooks[0];
-      if (nb) {
-        page.notebookId = nb.id;
-        changed = true;
-      }
+      nb = {
+        id: page.notebookId || `nb-${Date.now()}`,
+        name: 'My Notebook',
+        icon: '📓',
+        color: '#8b5cf6',
+        createdAt: page.createdAt || new Date().toISOString(),
+        updatedAt: page.updatedAt || new Date().toISOString(),
+        sections: [],
+      };
+      cloned.notebooks.push(nb);
+      changed = true;
     }
-    if (!nb) continue;
 
+    // Find or restore section
     let sec = nb.sections.find((s) => s.id === page.sectionId);
     if (!sec) {
-      sec = nb.sections[0];
-      if (sec) {
-        page.sectionId = sec.id;
-        changed = true;
-      }
+      sec = {
+        id: page.sectionId || `sec-${Date.now()}`,
+        notebookId: nb.id,
+        name: 'General',
+        createdAt: page.createdAt || new Date().toISOString(),
+        updatedAt: page.updatedAt || new Date().toISOString(),
+        pages: [],
+      };
+      nb.sections.push(sec);
+      changed = true;
     }
-    if (sec) {
-      sec.pages.push(page);
+
+    sec.pages.push(page);
+  }
+
+  // 4. If user has their own populated notebooks, remove any empty default template notebook
+  const userNotebooks = cloned.notebooks.filter(
+    (n) => n.id !== 'nb-1' && n.sections.some((s) => s.pages.length > 0)
+  );
+  if (userNotebooks.length > 0) {
+    const templateNbIdx = cloned.notebooks.findIndex(
+      (n) => n.id === 'nb-1' && n.sections.every((s) => s.pages.length === 0)
+    );
+    if (templateNbIdx >= 0) {
+      cloned.notebooks.splice(templateNbIdx, 1);
+      changed = true;
+    }
+  }
+
+  // 5. Ensure valid active selections
+  if (!cloned.notebooks.some((n) => n.id === cloned.activeNotebookId)) {
+    cloned.activeNotebookId = cloned.notebooks[0]?.id || null;
+    changed = true;
+  }
+  const activeNb = cloned.notebooks.find((n) => n.id === cloned.activeNotebookId);
+  if (activeNb) {
+    if (!activeNb.sections.some((s) => s.id === cloned.activeSectionId)) {
+      cloned.activeSectionId = activeNb.sections[0]?.id || null;
+      changed = true;
+    }
+    const activeSec = activeNb.sections.find((s) => s.id === cloned.activeSectionId);
+    if (activeSec && !activeSec.pages.some((p) => p.id === cloned.activePageId)) {
+      cloned.activePageId = activeSec.pages[0]?.id || null;
+      changed = true;
     }
   }
 

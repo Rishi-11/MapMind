@@ -469,22 +469,39 @@ export function AppContent() {
               );
               const idx = updatedWorkspace.notebooks.findIndex((n) => n.id === decryptedNb.id);
               if (idx >= 0) {
-                if (new Date(decryptedNb.updatedAt).getTime() > new Date(updatedWorkspace.notebooks[idx].updatedAt).getTime()) {
-                  // Merge notebook metadata while preserving local pages if cloud sections lack them
-                  updatedWorkspace.notebooks[idx] = {
-                    ...decryptedNb,
-                    sections: decryptedNb.sections.map((cloudSec) => {
-                      const localSec = updatedWorkspace.notebooks[idx].sections.find((s) => s.id === cloudSec.id);
-                      return {
-                        ...cloudSec,
-                        pages: localSec?.pages || cloudSec.pages || [],
-                      };
-                    }),
+                // Merge notebook metadata and sections while preserving existing local pages
+                const existingNb = updatedWorkspace.notebooks[idx];
+                const existingSectionsMap = new Map(existingNb.sections.map((s) => [s.id, s]));
+
+                const mergedSections: Section[] = decryptedNb.sections.map((cloudSec) => {
+                  const localSec = existingSectionsMap.get(cloudSec.id);
+                  return {
+                    ...cloudSec,
+                    pages: localSec?.pages && localSec.pages.length > 0 ? localSec.pages : (cloudSec.pages || []),
                   };
-                  hasNewData = true;
+                });
+
+                // Also keep any local sections that weren't in cloud yet
+                for (const localSec of existingNb.sections) {
+                  if (!mergedSections.some((s) => s.id === localSec.id)) {
+                    mergedSections.push(localSec);
+                  }
                 }
+
+                updatedWorkspace.notebooks[idx] = {
+                  ...decryptedNb,
+                  sections: mergedSections,
+                  updatedAt:
+                    new Date(decryptedNb.updatedAt).getTime() > new Date(existingNb.updatedAt).getTime()
+                      ? decryptedNb.updatedAt
+                      : existingNb.updatedAt,
+                };
+                hasNewData = true;
               } else {
-                updatedWorkspace.notebooks.push(decryptedNb);
+                updatedWorkspace.notebooks.push({
+                  ...decryptedNb,
+                  sections: decryptedNb.sections || [],
+                });
                 hasNewData = true;
               }
             } catch (nbErr) {
@@ -493,58 +510,72 @@ export function AppContent() {
           }
         }
 
-        // Merge cloud pages
+        // Merge cloud pages with strict hierarchy preservation (never dump into notebook 0)
         for (const cloudPg of cloudRes.pages) {
           if (!cloudPg.deleted && cloudPg.encrypted_content) {
             try {
               const decryptedPage = await decryptData<Page>(JSON.parse(cloudPg.encrypted_content), encryptionKey);
-              
-              // Find target notebook
+
+              // 1. Locate target notebook by decryptedPage.notebookId
               let targetNb = updatedWorkspace.notebooks.find((n) => n.id === decryptedPage.notebookId);
               if (!targetNb) {
-                // Look for notebook containing target sectionId
-                for (const nb of updatedWorkspace.notebooks) {
-                  if (nb.sections.some((s) => s.id === decryptedPage.sectionId)) {
-                    targetNb = nb;
-                    break;
-                  }
-                }
+                // Check if any notebook contains this section
+                targetNb = updatedWorkspace.notebooks.find((n) =>
+                  n.sections.some((s) => s.id === decryptedPage.sectionId)
+                );
               }
-              if (!targetNb) targetNb = updatedWorkspace.notebooks[0];
-              if (!targetNb) continue;
+              if (!targetNb) {
+                // Auto-create the Notebook by its original ID to preserve hierarchy
+                targetNb = {
+                  id: decryptedPage.notebookId || `nb-${Date.now()}`,
+                  name: 'My Notebook',
+                  icon: '📓',
+                  color: '#8b5cf6',
+                  createdAt: decryptedPage.createdAt || new Date().toISOString(),
+                  updatedAt: decryptedPage.updatedAt || new Date().toISOString(),
+                  sections: [],
+                };
+                updatedWorkspace.notebooks.push(targetNb);
+                hasNewData = true;
+              }
 
-              // Find target section
+              // 2. Locate target section by decryptedPage.sectionId within targetNb
               let targetSec = targetNb.sections.find((s) => s.id === decryptedPage.sectionId);
-              if (!targetSec) targetSec = targetNb.sections[0];
-              if (!targetSec) continue;
+              if (!targetSec) {
+                // Auto-create Section by its original ID to preserve hierarchy
+                targetSec = {
+                  id: decryptedPage.sectionId || `sec-${Date.now()}`,
+                  notebookId: targetNb.id,
+                  name: 'General',
+                  createdAt: decryptedPage.createdAt || new Date().toISOString(),
+                  updatedAt: decryptedPage.updatedAt || new Date().toISOString(),
+                  pages: [],
+                };
+                targetNb.sections.push(targetSec);
+                hasNewData = true;
+              }
 
-              // Check if page exists anywhere in workspace
-              let existingPage: Page | null = null;
-              let existingSec: Section | null = null;
+              // 3. Remove old versions of this page from any other sections in workspace
               for (const nb of updatedWorkspace.notebooks) {
                 for (const sec of nb.sections) {
-                  const p = sec.pages.find((pg) => pg.id === decryptedPage.id);
-                  if (p) {
-                    existingPage = p;
-                    existingSec = sec;
-                    break;
+                  if (sec.id !== targetSec.id) {
+                    const beforeLen = sec.pages.length;
+                    sec.pages = sec.pages.filter((p) => p.id !== decryptedPage.id);
+                    if (sec.pages.length !== beforeLen) hasNewData = true;
                   }
                 }
               }
 
-              if (existingPage && existingSec) {
-                if (new Date(decryptedPage.updatedAt).getTime() >= new Date(existingPage.updatedAt).getTime()) {
-                  if (existingSec.id !== targetSec.id) {
-                    existingSec.pages = existingSec.pages.filter((p) => p.id !== decryptedPage.id);
-                    targetSec.pages.unshift(decryptedPage);
-                  } else {
-                    const pIdx = existingSec.pages.findIndex((p) => p.id === decryptedPage.id);
-                    if (pIdx >= 0) existingSec.pages[pIdx] = decryptedPage;
-                  }
+              // 4. Update or insert in target section
+              const existingIndex = targetSec.pages.findIndex((p) => p.id === decryptedPage.id);
+              if (existingIndex >= 0) {
+                const localPage = targetSec.pages[existingIndex];
+                if (new Date(decryptedPage.updatedAt).getTime() >= new Date(localPage.updatedAt).getTime()) {
+                  targetSec.pages[existingIndex] = decryptedPage;
                   hasNewData = true;
                 }
               } else {
-                targetSec.pages.unshift(decryptedPage);
+                targetSec.pages.push(decryptedPage);
                 hasNewData = true;
               }
             } catch (pErr) {
@@ -553,6 +584,7 @@ export function AppContent() {
           }
         }
 
+        // Clean & Reconcile
         const reconciled = reconcileWorkspacePages(updatedWorkspace);
         if (reconciled.changed || hasNewData) {
           updatedWorkspace = reconciled.workspace;
@@ -575,6 +607,85 @@ export function AppContent() {
         errorMessage: err.message,
       }));
       showNotification(`Cloud sync failed: ${err.message}`, 'error');
+    }
+  }, [authUser, encryptionKey, authVerifier, workspace, showNotification]);
+
+  // One-click full vault backup to cloud (pushes all notebooks, sections, and notes with 100% hierarchy)
+  const handlePushAllToCloud = useCallback(async () => {
+    if (!authUser || !encryptionKey || !authVerifier) {
+      setIsCloudSyncModalOpen(true);
+      return;
+    }
+    if (!navigator.onLine) {
+      showNotification('Cannot push to cloud while offline.', 'error');
+      return;
+    }
+
+    setSyncStatus((s) => ({ ...s, state: 'syncing' }));
+    showNotification('☁ Backing up entire vault to cloud...', 'info');
+
+    try {
+      const ops: SyncQueueItem[] = [];
+      const now = new Date().toISOString();
+
+      for (const nb of workspace.notebooks) {
+        const encNb = await encryptData(nb, encryptionKey);
+        ops.push({
+          requestId: generateSecureId('req'),
+          userId: authUser.userId,
+          deviceId: authUser.deviceId,
+          operation: 'CREATE_NOTEBOOK',
+          objectId: nb.id,
+          baseVersion: 1,
+          timestamp: now,
+          encryptedPayload: JSON.stringify(encNb),
+          retries: 0,
+        });
+
+        for (const sec of nb.sections) {
+          for (const page of sec.pages) {
+            const encPage = await encryptData(page, encryptionKey);
+            ops.push({
+              requestId: generateSecureId('req'),
+              userId: authUser.userId,
+              deviceId: authUser.deviceId,
+              operation: 'CREATE_PAGE',
+              objectId: page.id,
+              baseVersion: 1,
+              timestamp: now,
+              encryptedPayload: JSON.stringify(encPage),
+              retries: 0,
+            });
+          }
+        }
+      }
+
+      if (ops.length > 0) {
+        const pushRes = await pushSyncOperations(
+          authUser.appsScriptUrl,
+          authUser.userId,
+          authVerifier,
+          authUser.deviceId,
+          ops
+        );
+        if (!pushRes.success) {
+          throw new Error(pushRes.error || 'Failed to backup vault to Google Sheets.');
+        }
+        if (pushRes.processedRequestIds && pushRes.processedRequestIds.length > 0) {
+          await removeProcessedSyncOps(pushRes.processedRequestIds);
+        }
+      }
+
+      setSyncStatus({
+        state: 'cloud_saved',
+        pendingCount: 0,
+        lastSyncedAt: new Date().toLocaleTimeString(),
+      });
+      showNotification('✅ Entire vault backed up to cloud with 100% hierarchy!', 'success');
+    } catch (err: any) {
+      console.warn('Vault backup error:', err);
+      showNotification(`Vault backup failed: ${err.message}`, 'error');
+      setSyncStatus((s) => ({ ...s, state: 'error' }));
     }
   }, [authUser, encryptionKey, authVerifier, workspace, showNotification]);
 
@@ -867,10 +978,15 @@ export function AppContent() {
         activeSectionId: newNb.sections[0].id,
         activePageId: newNb.sections[0].pages[0].id,
       });
+
+      // ☁️ Queue Cloud Sync
+      queueCloudSyncOperation('CREATE_NOTEBOOK', newNb.id, newNb, 1);
+      queueCloudSyncOperation('CREATE_PAGE', pageId, newNb.sections[0].pages[0], 1);
+
       setViewMode('editor');
       showNotification(`Created notebook "${name}"`, 'success');
     },
-    [workspace, persistWorkspace, showNotification]
+    [workspace, persistWorkspace, showNotification, queueCloudSyncOperation]
   );
 
   const handleCreateSection = useCallback(
@@ -886,13 +1002,21 @@ export function AppContent() {
       };
 
       const updatedNotebooks = workspace.notebooks.map((nb) =>
-        nb.id === notebookId ? { ...nb, sections: [...nb.sections, newSec] } : nb
+        nb.id === notebookId
+          ? { ...nb, sections: [...nb.sections, newSec], updatedAt: new Date().toISOString() }
+          : nb
       );
 
       persistWorkspace({ ...workspace, notebooks: updatedNotebooks, activeSectionId: newSec.id });
+
+      const updatedNb = updatedNotebooks.find((nb) => nb.id === notebookId);
+      if (updatedNb) {
+        queueCloudSyncOperation('UPDATE_NOTEBOOK', notebookId, updatedNb);
+      }
+
       showNotification(`Added section "${name}"`, 'success');
     },
-    [workspace, persistWorkspace, showNotification]
+    [workspace, persistWorkspace, showNotification, queueCloudSyncOperation]
   );
 
   const handleCreatePage = useCallback(
@@ -1112,11 +1236,17 @@ export function AppContent() {
       const updated = workspace.notebooks.map((nb) => ({
         ...nb,
         sections: nb.sections.filter((s) => s.id !== sectionId),
+        updatedAt: new Date().toISOString(),
       }));
       persistWorkspace({ ...workspace, notebooks: updated });
+
+      for (const nb of updated) {
+        queueCloudSyncOperation('UPDATE_NOTEBOOK', nb.id, nb);
+      }
+
       showNotification('Section deleted', 'info');
     },
-    [workspace, persistWorkspace, showNotification]
+    [workspace, persistWorkspace, showNotification, queueCloudSyncOperation]
   );
 
   // Rename Handlers
@@ -1127,9 +1257,15 @@ export function AppContent() {
         nb.id === notebookId ? { ...nb, name: newName, updatedAt: new Date().toISOString() } : nb
       );
       persistWorkspace({ ...workspace, notebooks: updated });
+
+      const updatedNb = updated.find((nb) => nb.id === notebookId);
+      if (updatedNb) {
+        queueCloudSyncOperation('UPDATE_NOTEBOOK', notebookId, updatedNb);
+      }
+
       showNotification(`Renamed notebook to "${newName}"`, 'info');
     },
-    [workspace, persistWorkspace, showNotification]
+    [workspace, persistWorkspace, showNotification, queueCloudSyncOperation]
   );
 
   const handleRenameSection = useCallback(
@@ -1142,12 +1278,19 @@ export function AppContent() {
           sections: nb.sections.map((sec) =>
             sec.id === sectionId ? { ...sec, name: newName, updatedAt: new Date().toISOString() } : sec
           ),
+          updatedAt: new Date().toISOString(),
         };
       });
       persistWorkspace({ ...workspace, notebooks: updated });
+
+      const updatedNb = updated.find((nb) => nb.id === notebookId);
+      if (updatedNb) {
+        queueCloudSyncOperation('UPDATE_NOTEBOOK', notebookId, updatedNb);
+      }
+
       showNotification(`Renamed section to "${newName}"`, 'info');
     },
-    [workspace, persistWorkspace, showNotification]
+    [workspace, persistWorkspace, showNotification, queueCloudSyncOperation]
   );
 
   const handleRenamePage = useCallback(
@@ -1171,8 +1314,12 @@ export function AppContent() {
       list[idx] = list[targetIdx];
       list[targetIdx] = temp;
       persistWorkspace({ ...workspace, notebooks: list });
+
+      for (const nb of list) {
+        queueCloudSyncOperation('UPDATE_NOTEBOOK', nb.id, nb);
+      }
     },
-    [workspace, persistWorkspace]
+    [workspace, persistWorkspace, queueCloudSyncOperation]
   );
 
   const handleReorderSections = useCallback(
@@ -1188,11 +1335,16 @@ export function AppContent() {
         const temp = sections[idx];
         sections[idx] = sections[targetIdx];
         sections[targetIdx] = temp;
-        return { ...nb, sections };
+        return { ...nb, sections, updatedAt: new Date().toISOString() };
       });
       persistWorkspace({ ...workspace, notebooks: updated });
+
+      const updatedNb = updated.find((nb) => nb.id === notebookId);
+      if (updatedNb) {
+        queueCloudSyncOperation('UPDATE_NOTEBOOK', notebookId, updatedNb);
+      }
     },
-    [workspace, persistWorkspace]
+    [workspace, persistWorkspace, queueCloudSyncOperation]
   );
 
   const handleReorderPages = useCallback(
@@ -2193,6 +2345,10 @@ export function AppContent() {
           setEncryptionKey(key);
           setAuthVerifier(verifier);
           showNotification(`Logged in as @${user.username}. Cloud Sync active!`, 'success');
+          // Trigger immediate cloud sync to pull all notebooks and notes
+          setTimeout(() => {
+            handlePerformCloudSync();
+          }, 150);
         }}
         onUserLoggedOut={() => {
           setAuthUser(null);
@@ -2202,6 +2358,7 @@ export function AppContent() {
           showNotification('Logged out from cloud account.', 'info');
         }}
         onTriggerManualSync={handlePerformCloudSync}
+        onPushAllToCloud={handlePushAllToCloud}
         onClearSyncQueue={handleClearSyncQueue}
         onRecoverFromBackup={handleRecoverFromBackup}
       />
