@@ -282,6 +282,7 @@ export function AppContent() {
 
   // Debounced cloud sync queue per object
   const cloudSyncTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const autoPushTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Helper to enqueue a client-side encrypted cloud sync operation
   const queueCloudSyncOperation = useCallback(
@@ -306,27 +307,35 @@ export function AppContent() {
           });
           const pending = await getPendingSyncOperations(authUser.userId);
           setSyncStatus((s) => ({ ...s, pendingCount: pending.length, state: 'local_saved' }));
+
+          // ⚡ Automatically stream/push changes to cloud in background after 1.2s debounce
+          if (autoPushTimerRef.current) clearTimeout(autoPushTimerRef.current);
+          autoPushTimerRef.current = setTimeout(() => {
+            if (navigator.onLine && authUser && encryptionKey && authVerifier) {
+              handlePerformCloudSync(true); // silent auto-push
+            }
+          }, 1200);
         } catch (err) {
           console.warn('Failed to queue encrypted cloud sync operation:', err);
         } finally {
           cloudSyncTimersRef.current.delete(timerKey);
         }
-      }, operation.startsWith('UPDATE') ? 800 : 0);
+      }, operation.startsWith('UPDATE') ? 600 : 0);
 
       cloudSyncTimersRef.current.set(timerKey, timer);
     },
-    [authUser, encryptionKey]
+    [authUser, encryptionKey, authVerifier]
   );
 
   // Perform full Cloud Sync (Push pending offline queue + Fetch cloud changes)
-  const handlePerformCloudSync = useCallback(async () => {
+  const handlePerformCloudSync = useCallback(async (silent = false) => {
     if (!authUser || !encryptionKey || !authVerifier) {
-      setIsCloudSyncModalOpen(true);
+      if (!silent) setIsCloudSyncModalOpen(true);
       return;
     }
     if (!navigator.onLine) {
       setSyncStatus((s) => ({ ...s, state: 'offline_waiting' }));
-      showNotification('Offline mode. Changes queued in IndexedDB.', 'info');
+      if (!silent) showNotification('Offline mode. Changes queued in IndexedDB.', 'info');
       return;
     }
 
@@ -598,7 +607,9 @@ export function AppContent() {
         pendingCount: remainingPending.length,
         lastSyncedAt: new Date().toLocaleTimeString(),
       });
-      showNotification('☁ Cloud sync completed successfully!', 'success');
+      if (!silent) {
+        showNotification('☁ Cloud sync completed successfully!', 'success');
+      }
     } catch (err: any) {
       console.warn('Cloud sync error:', err);
       setSyncStatus((s) => ({
@@ -606,9 +617,22 @@ export function AppContent() {
         state: navigator.onLine ? 'error' : 'offline_waiting',
         errorMessage: err.message,
       }));
-      showNotification(`Cloud sync failed: ${err.message}`, 'error');
+      if (!silent) {
+        showNotification(`Cloud sync failed: ${err.message}`, 'error');
+      }
     }
   }, [authUser, encryptionKey, authVerifier, workspace, showNotification]);
+
+  // Periodic background auto-sync every 60 seconds when online & authenticated
+  useEffect(() => {
+    if (!authUser || !encryptionKey || !authVerifier) return;
+    const interval = setInterval(() => {
+      if (navigator.onLine) {
+        handlePerformCloudSync(true); // background silent sync
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [authUser, encryptionKey, authVerifier, handlePerformCloudSync]);
 
   // One-click full vault backup to cloud (pushes all notebooks, sections, and notes with 100% hierarchy)
   const handlePushAllToCloud = useCallback(async () => {
