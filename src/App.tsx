@@ -268,16 +268,35 @@ export function AppContent() {
 
   // Debounced auto-save workspace to IndexedDB
   const workspaceSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const persistWorkspace = useCallback((updated: Workspace) => {
-    setWorkspace(updated);
-    setIsAutoSaving(true);
-    if (workspaceSaveTimerRef.current) clearTimeout(workspaceSaveTimerRef.current);
-    workspaceSaveTimerRef.current = setTimeout(async () => {
-      await saveWorkspace(updated);
-      setIsAutoSaving(false);
-      refreshVaultList();
-    }, 600);
-  }, [refreshVaultList]);
+  const currentWorkspaceRef = useRef<Workspace | null>(null);
+
+  // Synchronize currentWorkspaceRef with workspace state
+  useEffect(() => {
+    currentWorkspaceRef.current = workspace;
+  }, [workspace]);
+
+  const persistWorkspace = useCallback(
+    (action: Workspace | ((prev: Workspace) => Workspace)) => {
+      setWorkspace((prev) => {
+        if (!prev) return prev;
+        const next = typeof action === 'function' ? action(prev) : action;
+        currentWorkspaceRef.current = next;
+
+        setIsAutoSaving(true);
+        if (workspaceSaveTimerRef.current) clearTimeout(workspaceSaveTimerRef.current);
+        workspaceSaveTimerRef.current = setTimeout(async () => {
+          if (currentWorkspaceRef.current) {
+            await saveWorkspace(currentWorkspaceRef.current);
+          }
+          setIsAutoSaving(false);
+          refreshVaultList();
+        }, 600);
+
+        return next;
+      });
+    },
+    [refreshVaultList]
+  );
 
   // Debounced cloud sync queue per object
   const cloudSyncTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
@@ -287,6 +306,20 @@ export function AppContent() {
   const queueCloudSyncOperation = useCallback(
     (operation: SyncOperationType, objectId: string, payloadObj: any, baseVersion = 1) => {
       if (!authUser || !encryptionKey) return;
+
+      // When deleting an object, immediately cancel any pending update or create timer for that object
+      if (operation.startsWith('DELETE')) {
+        const updateKey = operation === 'DELETE_PAGE' ? `UPDATE_PAGE:${objectId}` : `UPDATE_NOTEBOOK:${objectId}`;
+        const createKey = operation === 'DELETE_PAGE' ? `CREATE_PAGE:${objectId}` : `CREATE_NOTEBOOK:${objectId}`;
+        if (cloudSyncTimersRef.current.has(updateKey)) {
+          clearTimeout(cloudSyncTimersRef.current.get(updateKey)!);
+          cloudSyncTimersRef.current.delete(updateKey);
+        }
+        if (cloudSyncTimersRef.current.has(createKey)) {
+          clearTimeout(cloudSyncTimersRef.current.get(createKey)!);
+          cloudSyncTimersRef.current.delete(createKey);
+        }
+      }
 
       const timerKey = `${operation}:${objectId}`;
       const existingTimer = cloudSyncTimersRef.current.get(timerKey);
@@ -467,14 +500,40 @@ export function AppContent() {
           }
         }
 
+        // Track pending local deletion operations to prevent cloud pull from resurrecting items that were deleted locally
+        const pendingDeletePageIds = new Set(
+          pendingOps.filter((op) => op.operation === 'DELETE_PAGE').map((op) => op.objectId)
+        );
+        const pendingDeleteNotebookIds = new Set(
+          pendingOps.filter((op) => op.operation === 'DELETE_NOTEBOOK').map((op) => op.objectId)
+        );
+
         // Merge cloud notebooks
         const hasCustomLocalNotebooks = updatedWorkspace.notebooks.some((n) => n.id !== 'nb-1');
 
         for (const cloudNb of cloudRes.notebooks) {
-          if (cloudNb.notebook_id === 'vault_master_backup' || cloudNb.deleted || !cloudNb.encrypted_metadata) {
+          if (cloudNb.notebook_id === 'vault_master_backup') {
             continue;
           }
+
+          // If notebook was deleted on cloud, delete it locally
+          if (cloudNb.deleted) {
+            const beforeLen = updatedWorkspace.notebooks.length;
+            updatedWorkspace.notebooks = updatedWorkspace.notebooks.filter((n) => n.id !== cloudNb.notebook_id);
+            if (updatedWorkspace.notebooks.length !== beforeLen) hasNewData = true;
+            continue;
+          }
+
+          // If notebook has a pending local deletion, do not merge cloud copy
+          if (pendingDeleteNotebookIds.has(cloudNb.notebook_id)) {
+            continue;
+          }
+
           if (cloudNb.notebook_id === 'nb-1' && hasCustomLocalNotebooks) {
+            continue;
+          }
+
+          if (!cloudNb.encrypted_metadata) {
             continue;
           }
 
@@ -527,7 +586,24 @@ export function AppContent() {
 
         // Merge cloud pages with strict hierarchy preservation
         for (const cloudPg of cloudRes.pages) {
-          if (!cloudPg.deleted && cloudPg.encrypted_content) {
+          // If page was deleted on cloud, remove from all local sections
+          if (cloudPg.deleted) {
+            for (const nb of updatedWorkspace.notebooks) {
+              for (const sec of nb.sections) {
+                const beforeLen = sec.pages.length;
+                sec.pages = sec.pages.filter((p) => p.id !== cloudPg.page_id);
+                if (sec.pages.length !== beforeLen) hasNewData = true;
+              }
+            }
+            continue;
+          }
+
+          // If page has a pending local deletion, do not merge cloud copy
+          if (pendingDeletePageIds.has(cloudPg.page_id)) {
+            continue;
+          }
+
+          if (cloudPg.encrypted_content) {
             try {
               const decryptedPage = await decryptData<Page>(JSON.parse(cloudPg.encrypted_content), encryptionKey);
 
@@ -540,6 +616,12 @@ export function AppContent() {
                 );
               }
               if (!targetNb) {
+                // Only create notebook if it is active in cloud notebooks
+                const isCloudNbActive = cloudRes.notebooks.some(
+                  (n) => n.notebook_id === decryptedPage.notebookId && !n.deleted
+                );
+                if (!isCloudNbActive) continue;
+
                 targetNb = {
                   id: decryptedPage.notebookId || `nb-${Date.now()}`,
                   name: 'Notebook',
@@ -1136,38 +1218,36 @@ export function AppContent() {
   // Workspace CRUD Operations
   const handleSelectPage = useCallback(
     (notebookId: string, sectionId: string, pageId: string) => {
-      if (!workspace) return;
-      persistWorkspace({
-        ...workspace,
+      persistWorkspace((prev) => ({
+        ...prev,
         activeNotebookId: notebookId,
         activeSectionId: sectionId,
         activePageId: pageId,
-      });
+      }));
     },
-    [workspace, persistWorkspace]
+    [persistWorkspace]
   );
 
   const handleSelectNotebook = useCallback(
     (notebookId: string) => {
-      if (!workspace) return;
-      const nb = workspace.notebooks.find((n) => n.id === notebookId);
-      if (nb) {
+      persistWorkspace((prev) => {
+        const nb = prev.notebooks.find((n) => n.id === notebookId);
+        if (!nb) return prev;
         const sec = nb.sections[0];
         const page = sec ? sec.pages[0] : null;
-        persistWorkspace({
-          ...workspace,
+        return {
+          ...prev,
           activeNotebookId: nb.id,
           activeSectionId: sec ? sec.id : null,
           activePageId: page ? page.id : null,
-        });
-      }
+        };
+      });
     },
-    [workspace, persistWorkspace]
+    [persistWorkspace]
   );
 
   const handleCreateNotebook = useCallback(
     (name: string, icon: string, color: string) => {
-      if (!workspace) return;
       const nbId = `nb-${Date.now()}`;
       const secId = `sec-${Date.now()}-1`;
       const pageId = `page-${Date.now()}-1`;
@@ -1204,17 +1284,19 @@ export function AppContent() {
         ],
       };
 
-      const isOnlyStarter =
-        workspace.notebooks.length === 1 &&
-        workspace.notebooks[0].id === 'nb-1';
-      const existingNotebooks = isOnlyStarter ? [] : workspace.notebooks;
+      persistWorkspace((prev) => {
+        const isOnlyStarter =
+          prev.notebooks.length === 1 &&
+          prev.notebooks[0].id === 'nb-1';
+        const existingNotebooks = isOnlyStarter ? [] : prev.notebooks;
 
-      persistWorkspace({
-        ...workspace,
-        notebooks: [...existingNotebooks, newNb],
-        activeNotebookId: newNb.id,
-        activeSectionId: newNb.sections[0].id,
-        activePageId: newNb.sections[0].pages[0].id,
+        return {
+          ...prev,
+          notebooks: [...existingNotebooks, newNb],
+          activeNotebookId: newNb.id,
+          activeSectionId: newNb.sections[0].id,
+          activePageId: newNb.sections[0].pages[0].id,
+        };
       });
 
       // ☁️ Queue Cloud Sync
@@ -1224,12 +1306,11 @@ export function AppContent() {
       setViewMode('editor');
       showNotification(`Created notebook "${name}"`, 'success');
     },
-    [workspace, persistWorkspace, showNotification, queueCloudSyncOperation]
+    [persistWorkspace, showNotification, queueCloudSyncOperation]
   );
 
   const handleCreateSection = useCallback(
     (notebookId: string, name: string) => {
-      if (!workspace) return;
       const secId = `sec-${Date.now()}`;
       const pageId = `page-${Date.now()}`;
 
@@ -1255,303 +1336,442 @@ export function AppContent() {
         pages: [newPage],
       };
 
-      const updatedNotebooks = workspace.notebooks.map((nb) =>
-        nb.id === notebookId
-          ? { ...nb, sections: [...nb.sections, newSec], updatedAt: new Date().toISOString() }
-          : nb
-      );
+      let targetNb: Notebook | undefined;
 
-      persistWorkspace({
-        ...workspace,
-        notebooks: updatedNotebooks,
-        activeNotebookId: notebookId,
-        activeSectionId: newSec.id,
-        activePageId: newPage.id,
+      persistWorkspace((prev) => {
+        const updatedNotebooks = prev.notebooks.map((nb) => {
+          if (nb.id !== notebookId) return nb;
+          const updated = { ...nb, sections: [...nb.sections, newSec], updatedAt: new Date().toISOString() };
+          targetNb = updated;
+          return updated;
+        });
+
+        return {
+          ...prev,
+          notebooks: updatedNotebooks,
+          activeNotebookId: notebookId,
+          activeSectionId: newSec.id,
+          activePageId: newPage.id,
+        };
       });
 
-      const updatedNb = updatedNotebooks.find((nb) => nb.id === notebookId);
-      if (updatedNb) {
-        queueCloudSyncOperation('UPDATE_NOTEBOOK', notebookId, updatedNb);
+      if (targetNb) {
+        queueCloudSyncOperation('UPDATE_NOTEBOOK', notebookId, targetNb);
         queueCloudSyncOperation('CREATE_PAGE', newPage.id, newPage, 1);
       }
 
       showNotification(`Added section "${name}"`, 'success');
     },
-    [workspace, persistWorkspace, showNotification, queueCloudSyncOperation]
+    [persistWorkspace, showNotification, queueCloudSyncOperation]
   );
 
   const handleCreatePage = useCallback(
     (notebookId?: string, sectionId?: string, title = 'Untitled Note') => {
-      if (!workspace || workspace.notebooks.length === 0) return;
+      let createdPage: Page | null = null;
+      let targetSecName = 'notebook';
 
-      let targetNb: Notebook | undefined;
-      let targetSec: Section | undefined;
+      persistWorkspace((prev) => {
+        if (!prev || prev.notebooks.length === 0) return prev;
 
-      // 1. If explicit sectionId is passed, search across all notebooks
-      if (sectionId) {
-        for (const nb of workspace.notebooks) {
+        let targetNb: Notebook | undefined;
+        let targetSec: Section | undefined;
+
+        // 1. If explicit sectionId is passed, search across all notebooks
+        if (sectionId) {
+          for (const nb of prev.notebooks) {
+            const sec = nb.sections.find((s) => s.id === sectionId);
+            if (sec) {
+              targetNb = nb;
+              targetSec = sec;
+              break;
+            }
+          }
+        }
+
+        // 2. If notebookId is provided or not resolved yet
+        if (!targetNb) {
+          const targetNbId = notebookId || prev.activeNotebookId || prev.notebooks[0]?.id;
+          targetNb = prev.notebooks.find((n) => n.id === targetNbId) || prev.notebooks[0];
+        }
+
+        if (!targetNb) return prev;
+
+        // 3. Resolve target section within notebook
+        if (!targetSec) {
+          if (prev.activeSectionId) {
+            targetSec = targetNb.sections.find((s) => s.id === prev.activeSectionId);
+          }
+          if (!targetSec) {
+            targetSec = targetNb.sections[0];
+          }
+        }
+
+        const newPageId = `page-${Date.now()}`;
+        const newSecId = targetSec ? targetSec.id : `sec-${Date.now()}`;
+        targetSecName = targetSec?.name || 'notebook';
+
+        const newPage: Page = {
+          id: newPageId,
+          notebookId: targetNb.id,
+          sectionId: newSecId,
+          title,
+          pageType: 'note',
+          tags: [],
+          properties: { type: 'note', status: 'draft' },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          content: title === 'Untitled Note' ? '' : `# ${title}\n\n`,
+        };
+        createdPage = newPage;
+
+        let updatedNotebooks: Notebook[];
+
+        if (!targetSec) {
+          // If notebook had no sections at all, create a default "General" section with this new note
+          const createdSec: Section = {
+            id: newSecId,
+            notebookId: targetNb.id,
+            name: 'General',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            pages: [newPage],
+          };
+          updatedNotebooks = prev.notebooks.map((nb) =>
+            nb.id === targetNb.id ? { ...nb, sections: [createdSec] } : nb
+          );
+        } else {
+          updatedNotebooks = prev.notebooks.map((nb) => {
+            if (nb.id !== targetNb.id) return nb;
+            return {
+              ...nb,
+              sections: nb.sections.map((sec) =>
+                sec.id === newSecId ? { ...sec, pages: [newPage, ...sec.pages] } : sec
+              ),
+            };
+          });
+        }
+
+        const rawWorkspace = {
+          ...prev,
+          notebooks: updatedNotebooks,
+          activeNotebookId: targetNb.id,
+          activeSectionId: newSecId,
+          activePageId: newPage.id,
+        };
+        const { workspace: cleanWorkspace } = reconcileWorkspacePages(rawWorkspace);
+        return cleanWorkspace;
+      });
+
+      if (createdPage) {
+        queueCloudSyncOperation('CREATE_PAGE', (createdPage as Page).id, createdPage, 1);
+      }
+      showNotification(`Created note in ${targetSecName}`, 'success');
+      setViewMode('editor');
+    },
+    [persistWorkspace, showNotification, queueCloudSyncOperation]
+  );
+
+  const handleUpdatePageContent = useCallback(
+    (pageId: string, content: string) => {
+      let targetPage: Page | null = null;
+      persistWorkspace((prev) => {
+        let found = false;
+        const updatedNotebooks = prev.notebooks.map((nb) => ({
+          ...nb,
+          sections: nb.sections.map((sec) => ({
+            ...sec,
+            pages: sec.pages.map((p) => {
+              if (p.id === pageId) {
+                found = true;
+                const updated = { ...p, content, updatedAt: new Date().toISOString() };
+                targetPage = updated;
+                return updated;
+              }
+              return p;
+            }),
+          })),
+        }));
+
+        if (!found) return prev;
+        return { ...prev, notebooks: updatedNotebooks };
+      });
+
+      if (targetPage) {
+        queueCloudSyncOperation('UPDATE_PAGE', pageId, targetPage);
+      }
+    },
+    [persistWorkspace, queueCloudSyncOperation]
+  );
+
+  const handleUpdatePageTitle = useCallback(
+    (pageId: string, title: string) => {
+      let targetPage: Page | null = null;
+      persistWorkspace((prev) => {
+        let found = false;
+        const updatedNotebooks = prev.notebooks.map((nb) => ({
+          ...nb,
+          sections: nb.sections.map((sec) => ({
+            ...sec,
+            pages: sec.pages.map((p) => {
+              if (p.id === pageId) {
+                found = true;
+                const updated = { ...p, title, updatedAt: new Date().toISOString() };
+                targetPage = updated;
+                return updated;
+              }
+              return p;
+            }),
+          })),
+        }));
+
+        if (!found) return prev;
+        return { ...prev, notebooks: updatedNotebooks };
+      });
+
+      if (targetPage) {
+        queueCloudSyncOperation('UPDATE_PAGE', pageId, targetPage);
+      }
+    },
+    [persistWorkspace, queueCloudSyncOperation]
+  );
+
+  const handleToggleFavorite = useCallback(
+    (pageId: string) => {
+      persistWorkspace((prev) => ({
+        ...prev,
+        notebooks: prev.notebooks.map((nb) => ({
+          ...nb,
+          sections: nb.sections.map((sec) => ({
+            ...sec,
+            pages: sec.pages.map((p) =>
+              p.id === pageId ? { ...p, favorite: !p.favorite } : p
+            ),
+          })),
+        })),
+      }));
+    },
+    [persistWorkspace]
+  );
+
+  const handleDeletePage = useCallback(
+    (pageId: string) => {
+      // 1. Cancel any pending debounce/cloud sync timers for this page immediately
+      const updateTimerKey = `UPDATE_PAGE:${pageId}`;
+      const createTimerKey = `CREATE_PAGE:${pageId}`;
+      if (cloudSyncTimersRef.current.has(updateTimerKey)) {
+        clearTimeout(cloudSyncTimersRef.current.get(updateTimerKey)!);
+        cloudSyncTimersRef.current.delete(updateTimerKey);
+      }
+      if (cloudSyncTimersRef.current.has(createTimerKey)) {
+        clearTimeout(cloudSyncTimersRef.current.get(createTimerKey)!);
+        cloudSyncTimersRef.current.delete(createTimerKey);
+      }
+
+      persistWorkspace((prev) => {
+        const updatedNotebooks = prev.notebooks.map((nb) => ({
+          ...nb,
+          sections: nb.sections.map((sec) => ({
+            ...sec,
+            pages: sec.pages.filter((p) => p.id !== pageId),
+          })),
+        }));
+
+        let nextActivePage = prev.activePageId;
+        if (prev.activePageId === pageId) {
+          const remainingPages: Page[] = [];
+          updatedNotebooks.forEach((nb) => nb.sections.forEach((sec) => remainingPages.push(...sec.pages)));
+          nextActivePage = remainingPages[0]?.id || null;
+        }
+
+        return {
+          ...prev,
+          notebooks: updatedNotebooks,
+          activePageId: nextActivePage,
+        };
+      });
+
+      queueCloudSyncOperation('DELETE_PAGE', pageId, { id: pageId });
+      showNotification('Note deleted', 'info');
+    },
+    [persistWorkspace, showNotification, queueCloudSyncOperation]
+  );
+
+  const handleDeleteNotebook = useCallback(
+    (notebookId: string) => {
+      // Find all page IDs in this notebook to cancel their timers and queue cloud deletion
+      const deletedPageIds: string[] = [];
+      if (currentWorkspaceRef.current) {
+        const nb = currentWorkspaceRef.current.notebooks.find((n) => n.id === notebookId);
+        if (nb) {
+          nb.sections.forEach((sec) => {
+            deletedPageIds.push(...sec.pages.map((p) => p.id));
+          });
+        }
+      }
+
+      // Cancel all pending timers for notebook and its pages
+      const nbUpdateKey = `UPDATE_NOTEBOOK:${notebookId}`;
+      const nbCreateKey = `CREATE_NOTEBOOK:${notebookId}`;
+      if (cloudSyncTimersRef.current.has(nbUpdateKey)) {
+        clearTimeout(cloudSyncTimersRef.current.get(nbUpdateKey)!);
+        cloudSyncTimersRef.current.delete(nbUpdateKey);
+      }
+      if (cloudSyncTimersRef.current.has(nbCreateKey)) {
+        clearTimeout(cloudSyncTimersRef.current.get(nbCreateKey)!);
+        cloudSyncTimersRef.current.delete(nbCreateKey);
+      }
+      for (const pId of deletedPageIds) {
+        const updateTimerKey = `UPDATE_PAGE:${pId}`;
+        const createTimerKey = `CREATE_PAGE:${pId}`;
+        if (cloudSyncTimersRef.current.has(updateTimerKey)) {
+          clearTimeout(cloudSyncTimersRef.current.get(updateTimerKey)!);
+          cloudSyncTimersRef.current.delete(updateTimerKey);
+        }
+        if (cloudSyncTimersRef.current.has(createTimerKey)) {
+          clearTimeout(cloudSyncTimersRef.current.get(createTimerKey)!);
+          cloudSyncTimersRef.current.delete(createTimerKey);
+        }
+      }
+
+      persistWorkspace((prev) => {
+        const updated = prev.notebooks.filter((nb) => nb.id !== notebookId);
+        return {
+          ...prev,
+          notebooks: updated,
+          activeNotebookId: updated[0]?.id || null,
+          activeSectionId: updated[0]?.sections[0]?.id || null,
+          activePageId: updated[0]?.sections[0]?.pages[0]?.id || null,
+        };
+      });
+
+      // Queue cloud deletion for all pages and notebook
+      for (const pId of deletedPageIds) {
+        queueCloudSyncOperation('DELETE_PAGE', pId, { id: pId });
+      }
+      queueCloudSyncOperation('DELETE_NOTEBOOK', notebookId, { id: notebookId });
+
+      showNotification('Notebook deleted', 'info');
+    },
+    [persistWorkspace, showNotification, queueCloudSyncOperation]
+  );
+
+  const handleDeleteSection = useCallback(
+    (sectionId: string) => {
+      // Find all page IDs in this section before deleting to cancel their timers & queue cloud deletion
+      const deletedPageIds: string[] = [];
+      if (currentWorkspaceRef.current) {
+        for (const nb of currentWorkspaceRef.current.notebooks) {
           const sec = nb.sections.find((s) => s.id === sectionId);
           if (sec) {
-            targetNb = nb;
-            targetSec = sec;
+            deletedPageIds.push(...sec.pages.map((p) => p.id));
             break;
           }
         }
       }
 
-      // 2. If notebookId is provided or not resolved yet
-      if (!targetNb) {
-        const targetNbId = notebookId || workspace.activeNotebookId || workspace.notebooks[0]?.id;
-        targetNb = workspace.notebooks.find((n) => n.id === targetNbId) || workspace.notebooks[0];
-      }
-
-      if (!targetNb) return;
-
-      // 3. Resolve target section within notebook
-      if (!targetSec) {
-        if (workspace.activeSectionId) {
-          targetSec = targetNb.sections.find((s) => s.id === workspace.activeSectionId);
+      // Cancel all pending timers for all pages in this section
+      for (const pId of deletedPageIds) {
+        const updateTimerKey = `UPDATE_PAGE:${pId}`;
+        const createTimerKey = `CREATE_PAGE:${pId}`;
+        if (cloudSyncTimersRef.current.has(updateTimerKey)) {
+          clearTimeout(cloudSyncTimersRef.current.get(updateTimerKey)!);
+          cloudSyncTimersRef.current.delete(updateTimerKey);
         }
-        if (!targetSec) {
-          targetSec = targetNb.sections[0];
+        if (cloudSyncTimersRef.current.has(createTimerKey)) {
+          clearTimeout(cloudSyncTimersRef.current.get(createTimerKey)!);
+          cloudSyncTimersRef.current.delete(createTimerKey);
         }
       }
 
-      const newPageId = `page-${Date.now()}`;
-      const newSecId = targetSec ? targetSec.id : `sec-${Date.now()}`;
-
-      const newPage: Page = {
-        id: newPageId,
-        notebookId: targetNb.id,
-        sectionId: newSecId,
-        title,
-        pageType: 'note',
-        tags: [],
-        properties: { type: 'note', status: 'draft' },
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        content: title === 'Untitled Note' ? '' : `# ${title}\n\n`,
-      };
-
-      let updatedNotebooks: Notebook[];
-
-      if (!targetSec) {
-        // If notebook had no sections at all, create a default "General" section with this new note
-        const createdSec: Section = {
-          id: newSecId,
-          notebookId: targetNb.id,
-          name: 'General',
-          createdAt: new Date().toISOString(),
+      persistWorkspace((prev) => {
+        const updated = prev.notebooks.map((nb) => ({
+          ...nb,
+          sections: nb.sections.filter((s) => s.id !== sectionId),
           updatedAt: new Date().toISOString(),
-          pages: [newPage],
+        }));
+
+        let nextActiveSecId = prev.activeSectionId;
+        let nextActivePageId = prev.activePageId;
+
+        if (prev.activeSectionId === sectionId || deletedPageIds.includes(prev.activePageId || '')) {
+          const curNb = updated.find((nb) => nb.id === prev.activeNotebookId) || updated[0];
+          nextActiveSecId = curNb?.sections[0]?.id || null;
+          nextActivePageId = curNb?.sections[0]?.pages[0]?.id || null;
+        }
+
+        return {
+          ...prev,
+          notebooks: updated,
+          activeSectionId: nextActiveSecId,
+          activePageId: nextActivePageId,
         };
-        updatedNotebooks = workspace.notebooks.map((nb) =>
-          nb.id === targetNb.id ? { ...nb, sections: [createdSec] } : nb
-        );
-      } else {
-        updatedNotebooks = workspace.notebooks.map((nb) => {
-          if (nb.id !== targetNb.id) return nb;
-          return {
-            ...nb,
-            sections: nb.sections.map((sec) =>
-              sec.id === newSecId ? { ...sec, pages: [newPage, ...sec.pages] } : sec
-            ),
-          };
-        });
-      }
-
-      const rawWorkspace = {
-        ...workspace,
-        notebooks: updatedNotebooks,
-        activeNotebookId: targetNb.id,
-        activeSectionId: newSecId,
-        activePageId: newPage.id,
-      };
-      const { workspace: cleanWorkspace } = reconcileWorkspacePages(rawWorkspace);
-
-      persistWorkspace(cleanWorkspace);
-
-      // ☁️ Queue Cloud Sync
-      queueCloudSyncOperation('CREATE_PAGE', newPage.id, newPage, 1);
-      showNotification(`Created note in ${targetSec?.name || 'notebook'}`, 'success');
-      setViewMode('editor');
-    },
-    [workspace, persistWorkspace, showNotification, queueCloudSyncOperation]
-  );
-
-  const handleUpdatePageContent = useCallback(
-    (pageId: string, content: string) => {
-      if (!workspace) return;
-      let targetPage: Page | null = null;
-      const updatedNotebooks = workspace.notebooks.map((nb) => ({
-        ...nb,
-        sections: nb.sections.map((sec) => ({
-          ...sec,
-          pages: sec.pages.map((p) => {
-            if (p.id === pageId) {
-              const updated = { ...p, content, updatedAt: new Date().toISOString() };
-              targetPage = updated;
-              return updated;
-            }
-            return p;
-          }),
-        })),
-      }));
-
-      persistWorkspace({ ...workspace, notebooks: updatedNotebooks });
-      if (targetPage) {
-        queueCloudSyncOperation('UPDATE_PAGE', pageId, targetPage);
-      }
-    },
-    [workspace, persistWorkspace, queueCloudSyncOperation]
-  );
-
-  const handleUpdatePageTitle = useCallback(
-    (pageId: string, title: string) => {
-      if (!workspace) return;
-      let targetPage: Page | null = null;
-      const updatedNotebooks = workspace.notebooks.map((nb) => ({
-        ...nb,
-        sections: nb.sections.map((sec) => ({
-          ...sec,
-          pages: sec.pages.map((p) => {
-            if (p.id === pageId) {
-              const updated = { ...p, title, updatedAt: new Date().toISOString() };
-              targetPage = updated;
-              return updated;
-            }
-            return p;
-          }),
-        })),
-      }));
-
-      persistWorkspace({ ...workspace, notebooks: updatedNotebooks });
-      if (targetPage) {
-        queueCloudSyncOperation('UPDATE_PAGE', pageId, targetPage);
-      }
-    },
-    [workspace, persistWorkspace, queueCloudSyncOperation]
-  );
-
-  const handleToggleFavorite = useCallback(
-    (pageId: string) => {
-      if (!workspace) return;
-      const updatedNotebooks = workspace.notebooks.map((nb) => ({
-        ...nb,
-        sections: nb.sections.map((sec) => ({
-          ...sec,
-          pages: sec.pages.map((p) =>
-            p.id === pageId ? { ...p, favorite: !p.favorite } : p
-          ),
-        })),
-      }));
-
-      persistWorkspace({ ...workspace, notebooks: updatedNotebooks });
-    },
-    [workspace, persistWorkspace]
-  );
-
-  const handleDeletePage = useCallback(
-    (pageId: string) => {
-      if (!workspace) return;
-      const updatedNotebooks = workspace.notebooks.map((nb) => ({
-        ...nb,
-        sections: nb.sections.map((sec) => ({
-          ...sec,
-          pages: sec.pages.filter((p) => p.id !== pageId),
-        })),
-      }));
-
-      const nextActivePage = allPages.find((p) => p.id !== pageId)?.id || null;
-      persistWorkspace({
-        ...workspace,
-        notebooks: updatedNotebooks,
-        activePageId: nextActivePage,
       });
-      queueCloudSyncOperation('DELETE_PAGE', pageId, { id: pageId });
-      showNotification('Note deleted', 'info');
-    },
-    [workspace, allPages, persistWorkspace, showNotification, queueCloudSyncOperation]
-  );
 
-  const handleDeleteNotebook = useCallback(
-    (notebookId: string) => {
-      if (!workspace) return;
-      const updated = workspace.notebooks.filter((nb) => nb.id !== notebookId);
-      persistWorkspace({
-        ...workspace,
-        notebooks: updated,
-        activeNotebookId: updated[0]?.id || null,
-        activeSectionId: updated[0]?.sections[0]?.id || null,
-        activePageId: updated[0]?.sections[0]?.pages[0]?.id || null,
-      });
-      queueCloudSyncOperation('DELETE_NOTEBOOK', notebookId, { id: notebookId });
-      showNotification('Notebook deleted', 'info');
-    },
-    [workspace, persistWorkspace, showNotification, queueCloudSyncOperation]
-  );
+      // Queue DELETE_PAGE for every single page in the deleted section so cloud doesn't restore them
+      for (const pId of deletedPageIds) {
+        queueCloudSyncOperation('DELETE_PAGE', pId, { id: pId });
+      }
 
-  const handleDeleteSection = useCallback(
-    (sectionId: string) => {
-      if (!workspace) return;
-      const updated = workspace.notebooks.map((nb) => ({
-        ...nb,
-        sections: nb.sections.filter((s) => s.id !== sectionId),
-        updatedAt: new Date().toISOString(),
-      }));
-      persistWorkspace({ ...workspace, notebooks: updated });
-
-      for (const nb of updated) {
-        queueCloudSyncOperation('UPDATE_NOTEBOOK', nb.id, nb);
+      if (currentWorkspaceRef.current) {
+        for (const nb of currentWorkspaceRef.current.notebooks) {
+          queueCloudSyncOperation('UPDATE_NOTEBOOK', nb.id, nb);
+        }
       }
 
       showNotification('Section deleted', 'info');
     },
-    [workspace, persistWorkspace, showNotification, queueCloudSyncOperation]
+    [persistWorkspace, showNotification, queueCloudSyncOperation]
   );
 
   // Rename Handlers
   const handleRenameNotebook = useCallback(
     (notebookId: string, newName: string) => {
-      if (!workspace) return;
-      const updated = workspace.notebooks.map((nb) =>
-        nb.id === notebookId ? { ...nb, name: newName, updatedAt: new Date().toISOString() } : nb
-      );
-      persistWorkspace({ ...workspace, notebooks: updated });
+      let updatedNb: Notebook | undefined;
+      persistWorkspace((prev) => {
+        const updated = prev.notebooks.map((nb) => {
+          if (nb.id !== notebookId) return nb;
+          const u = { ...nb, name: newName, updatedAt: new Date().toISOString() };
+          updatedNb = u;
+          return u;
+        });
+        return { ...prev, notebooks: updated };
+      });
 
-      const updatedNb = updated.find((nb) => nb.id === notebookId);
       if (updatedNb) {
         queueCloudSyncOperation('UPDATE_NOTEBOOK', notebookId, updatedNb);
       }
 
       showNotification(`Renamed notebook to "${newName}"`, 'info');
     },
-    [workspace, persistWorkspace, showNotification, queueCloudSyncOperation]
+    [persistWorkspace, showNotification, queueCloudSyncOperation]
   );
 
   const handleRenameSection = useCallback(
     (notebookId: string, sectionId: string, newName: string) => {
-      if (!workspace) return;
-      const updated = workspace.notebooks.map((nb) => {
-        if (nb.id !== notebookId) return nb;
-        return {
-          ...nb,
-          sections: nb.sections.map((sec) =>
-            sec.id === sectionId ? { ...sec, name: newName, updatedAt: new Date().toISOString() } : sec
-          ),
-          updatedAt: new Date().toISOString(),
-        };
+      let updatedNb: Notebook | undefined;
+      persistWorkspace((prev) => {
+        const updated = prev.notebooks.map((nb) => {
+          if (nb.id !== notebookId) return nb;
+          const u = {
+            ...nb,
+            sections: nb.sections.map((sec) =>
+              sec.id === sectionId ? { ...sec, name: newName, updatedAt: new Date().toISOString() } : sec
+            ),
+            updatedAt: new Date().toISOString(),
+          };
+          updatedNb = u;
+          return u;
+        });
+        return { ...prev, notebooks: updated };
       });
-      persistWorkspace({ ...workspace, notebooks: updated });
 
-      const updatedNb = updated.find((nb) => nb.id === notebookId);
       if (updatedNb) {
         queueCloudSyncOperation('UPDATE_NOTEBOOK', notebookId, updatedNb);
       }
 
       showNotification(`Renamed section to "${newName}"`, 'info');
     },
-    [workspace, persistWorkspace, showNotification, queueCloudSyncOperation]
+    [persistWorkspace, showNotification, queueCloudSyncOperation]
   );
 
   const handleRenamePage = useCallback(
@@ -1565,70 +1785,77 @@ export function AppContent() {
   // Reorder Handlers (Move Up / Move Down)
   const handleReorderNotebooks = useCallback(
     (notebookId: string, direction: 'up' | 'down') => {
-      if (!workspace) return;
-      const list = [...workspace.notebooks];
-      const idx = list.findIndex((n) => n.id === notebookId);
-      if (idx === -1) return;
-      const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
-      if (targetIdx < 0 || targetIdx >= list.length) return;
-      const temp = list[idx];
-      list[idx] = list[targetIdx];
-      list[targetIdx] = temp;
-      persistWorkspace({ ...workspace, notebooks: list });
+      persistWorkspace((prev) => {
+        const list = [...prev.notebooks];
+        const idx = list.findIndex((n) => n.id === notebookId);
+        if (idx === -1) return prev;
+        const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+        if (targetIdx < 0 || targetIdx >= list.length) return prev;
+        const temp = list[idx];
+        list[idx] = list[targetIdx];
+        list[targetIdx] = temp;
 
-      for (const nb of list) {
-        queueCloudSyncOperation('UPDATE_NOTEBOOK', nb.id, nb);
-      }
+        for (const nb of list) {
+          queueCloudSyncOperation('UPDATE_NOTEBOOK', nb.id, nb);
+        }
+
+        return { ...prev, notebooks: list };
+      });
     },
-    [workspace, persistWorkspace, queueCloudSyncOperation]
+    [persistWorkspace, queueCloudSyncOperation]
   );
 
   const handleReorderSections = useCallback(
     (notebookId: string, sectionId: string, direction: 'up' | 'down') => {
-      if (!workspace) return;
-      const updated = workspace.notebooks.map((nb) => {
-        if (nb.id !== notebookId) return nb;
-        const sections = [...nb.sections];
-        const idx = sections.findIndex((s) => s.id === sectionId);
-        if (idx === -1) return nb;
-        const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
-        if (targetIdx < 0 || targetIdx >= sections.length) return nb;
-        const temp = sections[idx];
-        sections[idx] = sections[targetIdx];
-        sections[targetIdx] = temp;
-        return { ...nb, sections, updatedAt: new Date().toISOString() };
-      });
-      persistWorkspace({ ...workspace, notebooks: updated });
+      persistWorkspace((prev) => {
+        let targetNb: Notebook | undefined;
+        const updated = prev.notebooks.map((nb) => {
+          if (nb.id !== notebookId) return nb;
+          const sections = [...nb.sections];
+          const idx = sections.findIndex((s) => s.id === sectionId);
+          if (idx === -1) return nb;
+          const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+          if (targetIdx < 0 || targetIdx >= sections.length) return nb;
+          const temp = sections[idx];
+          sections[idx] = sections[targetIdx];
+          sections[targetIdx] = temp;
+          const u = { ...nb, sections, updatedAt: new Date().toISOString() };
+          targetNb = u;
+          return u;
+        });
 
-      const updatedNb = updated.find((nb) => nb.id === notebookId);
-      if (updatedNb) {
-        queueCloudSyncOperation('UPDATE_NOTEBOOK', notebookId, updatedNb);
-      }
+        if (targetNb) {
+          queueCloudSyncOperation('UPDATE_NOTEBOOK', notebookId, targetNb);
+        }
+
+        return { ...prev, notebooks: updated };
+      });
     },
-    [workspace, persistWorkspace, queueCloudSyncOperation]
+    [persistWorkspace, queueCloudSyncOperation]
   );
 
   const handleReorderPages = useCallback(
     (sectionId: string, pageId: string, direction: 'up' | 'down') => {
-      if (!workspace) return;
-      const updated = workspace.notebooks.map((nb) => ({
-        ...nb,
-        sections: nb.sections.map((sec) => {
-          if (sec.id !== sectionId) return sec;
-          const pages = [...sec.pages];
-          const idx = pages.findIndex((p) => p.id === pageId);
-          if (idx === -1) return sec;
-          const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
-          if (targetIdx < 0 || targetIdx >= pages.length) return sec;
-          const temp = pages[idx];
-          pages[idx] = pages[targetIdx];
-          pages[targetIdx] = temp;
-          return { ...sec, pages };
-        }),
-      }));
-      persistWorkspace({ ...workspace, notebooks: updated });
+      persistWorkspace((prev) => {
+        const updated = prev.notebooks.map((nb) => ({
+          ...nb,
+          sections: nb.sections.map((sec) => {
+            if (sec.id !== sectionId) return sec;
+            const pages = [...sec.pages];
+            const idx = pages.findIndex((p) => p.id === pageId);
+            if (idx === -1) return sec;
+            const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+            if (targetIdx < 0 || targetIdx >= pages.length) return sec;
+            const temp = pages[idx];
+            pages[idx] = pages[targetIdx];
+            pages[targetIdx] = temp;
+            return { ...sec, pages };
+          }),
+        }));
+        return { ...prev, notebooks: updated };
+      });
     },
-    [workspace, persistWorkspace]
+    [persistWorkspace]
   );
 
   // Navigate to page by title or alias (from WikiLinks, Backlinks, etc.), auto-creating note if it does not exist
@@ -1696,13 +1923,6 @@ export function AppContent() {
       return;
     }
 
-    // Find or create a "Daily Notes" section in the active notebook
-    const targetNb = workspace.notebooks.find((n) => n.id === workspace.activeNotebookId) || workspace.notebooks[0];
-    if (!targetNb) return;
-
-    let targetSec = targetNb.sections.find((s) => s.name.toLowerCase().includes('daily'));
-    const targetSecId = targetSec ? targetSec.id : targetNb.sections[0]?.id || `sec-${Date.now()}`;
-
     const newPageId = `page-daily-${Date.now()}`;
     const initialContent = `# 📅 ${title}
 
@@ -1714,53 +1934,61 @@ export function AppContent() {
 ## 🔗 Connected Notes
 `;
 
-    const newDailyPage: Page = {
-      id: newPageId,
-      notebookId: targetNb.id,
-      sectionId: targetSecId,
-      title,
-      pageType: 'daily',
-      tags: ['daily'],
-      properties: { type: 'daily', status: 'in_progress', tags: ['daily'] },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      content: initialContent,
-    };
+    persistWorkspace((prev) => {
+      const targetNb = prev.notebooks.find((n) => n.id === prev.activeNotebookId) || prev.notebooks[0];
+      if (!targetNb) return prev;
 
-    const updatedNotebooks = workspace.notebooks.map((nb) => {
-      if (nb.id !== targetNb.id) return nb;
-      const secExists = nb.sections.some((s) => s.id === targetSecId);
-      if (secExists) {
-        return {
-          ...nb,
-          sections: nb.sections.map((sec) =>
-            sec.id === targetSecId ? { ...sec, pages: [newDailyPage, ...sec.pages] } : sec
-          ),
-        };
-      } else {
-        return {
-          ...nb,
-          sections: [
-            {
-              id: targetSecId,
-              notebookId: targetNb.id,
-              name: '📅 Daily Notes',
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-              pages: [newDailyPage],
-            },
-            ...nb.sections,
-          ],
-        };
-      }
-    });
+      let targetSec = targetNb.sections.find((s) => s.name.toLowerCase().includes('daily'));
+      const targetSecId = targetSec ? targetSec.id : targetNb.sections[0]?.id || `sec-${Date.now()}`;
 
-    persistWorkspace({
-      ...workspace,
-      notebooks: updatedNotebooks,
-      activeNotebookId: targetNb.id,
-      activeSectionId: targetSecId,
-      activePageId: newDailyPage.id,
+      const newDailyPage: Page = {
+        id: newPageId,
+        notebookId: targetNb.id,
+        sectionId: targetSecId,
+        title,
+        pageType: 'daily',
+        tags: ['daily'],
+        properties: { type: 'daily', status: 'in_progress', tags: ['daily'] },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        content: initialContent,
+      };
+
+      const updatedNotebooks = prev.notebooks.map((nb) => {
+        if (nb.id !== targetNb.id) return nb;
+        const secExists = nb.sections.some((s) => s.id === targetSecId);
+        if (secExists) {
+          return {
+            ...nb,
+            sections: nb.sections.map((sec) =>
+              sec.id === targetSecId ? { ...sec, pages: [newDailyPage, ...sec.pages] } : sec
+            ),
+          };
+        } else {
+          return {
+            ...nb,
+            sections: [
+              {
+                id: targetSecId,
+                notebookId: targetNb.id,
+                name: '📅 Daily Notes',
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                pages: [newDailyPage],
+              },
+              ...nb.sections,
+            ],
+          };
+        }
+      });
+
+      return {
+        ...prev,
+        notebooks: updatedNotebooks,
+        activeNotebookId: targetNb.id,
+        activeSectionId: targetSecId,
+        activePageId: newDailyPage.id,
+      };
     });
 
     setViewMode('editor');
@@ -2133,6 +2361,7 @@ export function AppContent() {
             {/* Center Editor / Live Preview */}
             {activePage ? (
               <MarkdownEditor
+                key={activePage.id}
                 page={activePage}
                 allPages={allPages}
                 onUpdateContent={handleUpdatePageContent}
@@ -2164,10 +2393,10 @@ export function AppContent() {
                 aiSuggestions={aiSuggestions}
                 aiMode={workspace.settings.aiConnectionMode}
                 onChangeAiMode={(mode) =>
-                  persistWorkspace({
-                    ...workspace,
-                    settings: { ...workspace.settings, aiConnectionMode: mode },
-                  })
+                  persistWorkspace((prev) => ({
+                    ...prev,
+                    settings: { ...prev.settings, aiConnectionMode: mode },
+                  }))
                 }
                 onAcceptAiSuggestion={handleAcceptAiSuggestion}
                 onRejectAiSuggestion={() => showNotification(`Ignored connection`, 'info')}

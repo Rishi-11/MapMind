@@ -607,35 +607,34 @@ export function reconcileWorkspacePages(ws: Workspace): { workspace: Workspace; 
 
   // 3. Assign each unique page back to its exact notebook and section
   for (const page of pageMap.values()) {
-    // Find or restore notebook
+    // Find or assign to existing notebook
     let nb = cloned.notebooks.find((n) => n.id === page.notebookId);
     if (!nb) {
-      nb = {
-        id: page.notebookId || `nb-${Date.now()}`,
-        name: 'My Notebook',
-        icon: '📓',
-        color: '#8b5cf6',
-        createdAt: page.createdAt || new Date().toISOString(),
-        updatedAt: page.updatedAt || new Date().toISOString(),
-        sections: [],
-      };
-      cloned.notebooks.push(nb);
+      nb = cloned.notebooks[0];
+      if (!nb) continue;
+      page.notebookId = nb.id;
       changed = true;
     }
 
-    // Find or restore section
+    // Find or assign to existing section
     let sec = nb.sections.find((s) => s.id === page.sectionId);
     if (!sec) {
-      sec = {
-        id: page.sectionId || `sec-${Date.now()}`,
-        notebookId: nb.id,
-        name: 'General',
-        createdAt: page.createdAt || new Date().toISOString(),
-        updatedAt: page.updatedAt || new Date().toISOString(),
-        pages: [],
-      };
-      nb.sections.push(sec);
-      changed = true;
+      if (nb.sections.length > 0) {
+        sec = nb.sections[0];
+        page.sectionId = sec.id;
+        changed = true;
+      } else {
+        sec = {
+          id: page.sectionId || `sec-${Date.now()}`,
+          notebookId: nb.id,
+          name: 'General',
+          createdAt: page.createdAt || new Date().toISOString(),
+          updatedAt: page.updatedAt || new Date().toISOString(),
+          pages: [],
+        };
+        nb.sections.push(sec);
+        changed = true;
+      }
     }
 
     sec.pages.push(page);

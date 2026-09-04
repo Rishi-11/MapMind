@@ -1,5 +1,4 @@
-import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
-import * as THREE from 'three';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import {
   RotateCcw,
   Play,
@@ -40,10 +39,13 @@ interface Node3DData {
   vz: number;
   radius: number;
   degree: number;
-  mesh?: THREE.Mesh;
-  haloMesh?: THREE.Mesh;
-  sprite?: THREE.Sprite;
   connectedNodeIds: Set<string>;
+  // Projected screen coordinates
+  projX?: number;
+  projY?: number;
+  projZ?: number;
+  projR?: number;
+  visible?: boolean;
 }
 
 interface Edge3DData {
@@ -52,59 +54,14 @@ interface Edge3DData {
   target: string;
   isAi: boolean;
   confidence?: number;
-  cylinderMesh?: THREE.Mesh;
 }
 
-/**
- * Creates high-resolution text sprite that faces the camera
- */
-function createTextSprite(text: string, isDarkMode: boolean, color: string): THREE.Sprite {
-  const canvas = document.createElement('canvas');
-  const context = canvas.getContext('2d');
-  if (!context) return new THREE.Sprite();
-
-  canvas.width = 512;
-  canvas.height = 128;
-
-  context.clearRect(0, 0, canvas.width, canvas.height);
-
-  const fontSize = 32;
-  context.font = `bold ${fontSize}px system-ui, -apple-system, sans-serif`;
-
-  const textWidth = context.measureText(text).width;
-  const rectWidth = Math.min(canvas.width - 20, textWidth + 48);
-  const rectHeight = 60;
-  const rectX = (canvas.width - rectWidth) / 2;
-  const rectY = (canvas.height - rectHeight) / 2;
-
-  // Background rounded pill
-  context.beginPath();
-  context.roundRect(rectX, rectY, rectWidth, rectHeight, 16);
-  context.fillStyle = isDarkMode ? 'rgba(15, 23, 42, 0.94)' : 'rgba(255, 255, 255, 0.95)';
-  context.fill();
-
-  context.lineWidth = 3.5;
-  context.strokeStyle = color || '#8b5cf6';
-  context.stroke();
-
-  // Text
-  context.fillStyle = isDarkMode ? '#f8fafc' : '#0f172a';
-  context.textAlign = 'center';
-  context.textBaseline = 'middle';
-  context.fillText(text, canvas.width / 2, canvas.height / 2 + 1);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.needsUpdate = true;
-
-  const spriteMaterial = new THREE.SpriteMaterial({
-    map: texture,
-    transparent: true,
-    depthTest: false,
-  });
-
-  const sprite = new THREE.Sprite(spriteMaterial);
-  sprite.scale.set(48, 12, 1);
-  return sprite;
+interface Star3D {
+  x: number;
+  y: number;
+  z: number;
+  size: number;
+  alpha: number;
 }
 
 export const KnowledgeGraph3DView: React.FC<KnowledgeGraph3DViewProps> = ({
@@ -119,12 +76,12 @@ export const KnowledgeGraph3DView: React.FC<KnowledgeGraph3DViewProps> = ({
   selectedNotebookId,
   showAiEdges,
 }) => {
-  const mountRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [autoRotate, setAutoRotate] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [selectedNodeData, setSelectedNodeData] = useState<Node3DData | null>(null);
-  const [sceneReady, setSceneReady] = useState(0);
 
   // Mutable state refs to prevent scene destruction on toggle
   const autoRotateRef = useRef(autoRotate);
@@ -133,25 +90,20 @@ export const KnowledgeGraph3DView: React.FC<KnowledgeGraph3DViewProps> = ({
   const showLabelsRef = useRef(showLabels);
   showLabelsRef.current = showLabels;
 
-  // Three.js Scene References
-  const sceneRef = useRef<THREE.Scene | null>(null);
-  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-  const nodesGroupRef = useRef<THREE.Group | null>(null);
-  const edgesGroupRef = useRef<THREE.Group | null>(null);
-  const raycasterRef = useRef(new THREE.Raycaster());
-  const mouseRef = useRef(new THREE.Vector2());
+  const hoveredNodeIdRef = useRef<string | null>(null);
+  hoveredNodeIdRef.current = hoveredNodeId;
 
   // Orbit & Pan State
   const isDraggingRef = useRef(false);
   const isRightClickRef = useRef(false);
   const previousMousePositionRef = useRef({ x: 0, y: 0 });
   const cameraSphericalRef = useRef({ radius: 650, theta: Math.PI / 4, phi: Math.PI / 3 });
-  const cameraTargetRef = useRef(new THREE.Vector3(0, 0, 0));
+  const cameraTargetRef = useRef({ x: 0, y: 0, z: 0 });
 
-  // Node & Edge Data
+  // Node, Edge & Star Data
   const nodesDataRef = useRef<Node3DData[]>([]);
   const edgesDataRef = useRef<Edge3DData[]>([]);
+  const starsRef = useRef<Star3D[]>([]);
 
   // Notebook Color Lookup
   const notebookColorMap = useMemo(() => {
@@ -161,6 +113,28 @@ export const KnowledgeGraph3DView: React.FC<KnowledgeGraph3DViewProps> = ({
     });
     return map;
   }, [workspace.notebooks]);
+
+  // Generate Universe Starfield
+  useEffect(() => {
+    const stars: Star3D[] = [];
+    const count = 350;
+    for (let i = 0; i < count; i++) {
+      const u = Math.random();
+      const v = Math.random();
+      const theta = u * 2.0 * Math.PI;
+      const phi = Math.acos(2.0 * v - 1.0);
+      const r = 800 + Math.random() * 1200;
+      const sinPhi = Math.sin(phi);
+      stars.push({
+        x: r * sinPhi * Math.cos(theta),
+        y: r * Math.cos(phi),
+        z: r * sinPhi * Math.sin(theta),
+        size: Math.random() * 1.6 + 0.6,
+        alpha: Math.random() * 0.5 + 0.25,
+      });
+    }
+    starsRef.current = stars;
+  }, []);
 
   // Build Graph Data
   const { graphNodes, graphEdges } = useMemo(() => {
@@ -270,7 +244,7 @@ export const KnowledgeGraph3DView: React.FC<KnowledgeGraph3DViewProps> = ({
 
     // Dynamic radius scaled by degree
     nodes.forEach((n) => {
-      n.radius = Math.min(24, Math.max(10, (n.id === activePageId ? 16 : 10) + n.degree * 2));
+      n.radius = Math.min(22, Math.max(10, (n.id === activePageId ? 16 : 10) + n.degree * 2));
     });
 
     nodesDataRef.current = nodes;
@@ -279,109 +253,50 @@ export const KnowledgeGraph3DView: React.FC<KnowledgeGraph3DViewProps> = ({
     return { graphNodes: nodes, graphEdges: edges };
   }, [allPages, selectedNotebookId, searchQuery, notebookColorMap, activePageId, showAiEdges, aiSuggestions]);
 
-  // Update Camera from spherical coordinates
-  const updateCameraFromSpherical = useCallback(() => {
-    if (!cameraRef.current) return;
-    const { radius, theta, phi } = cameraSphericalRef.current;
-    const x = radius * Math.sin(phi) * Math.cos(theta) + cameraTargetRef.current.x;
-    const y = radius * Math.cos(phi) + cameraTargetRef.current.y;
-    const z = radius * Math.sin(phi) * Math.sin(theta) + cameraTargetRef.current.z;
-    cameraRef.current.position.set(x, y, z);
-    cameraRef.current.lookAt(cameraTargetRef.current);
-  }, []);
-
-  // Initialize Three.js Scene ONCE
+  // Main 3D Canvas Projection & Render Engine
   useEffect(() => {
-    const mount = mountRef.current;
-    if (!mount) return;
+    const canvas = canvasRef.current;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
 
-    const width = mount.clientWidth || 900;
-    const height = mount.clientHeight || 650;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
-    // 1. Scene
-    const scene = new THREE.Scene();
-    sceneRef.current = scene;
-    scene.background = new THREE.Color(isDarkMode ? 0x070913 : 0xf8fafc);
-    if (isDarkMode) {
-      scene.fog = new THREE.FogExp2(0x070913, 0.0006);
-    }
-
-    // 2. Camera
-    const camera = new THREE.PerspectiveCamera(48, width / height, 1, 4000);
-    cameraRef.current = camera;
-    updateCameraFromSpherical();
-
-    // 3. Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
-    rendererRef.current = renderer;
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    mount.appendChild(renderer.domElement);
-
-    // 4. Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, isDarkMode ? 0.9 : 1.3);
-    scene.add(ambientLight);
-
-    const pointLight = new THREE.PointLight(0xa855f7, 2.5, 1200);
-    pointLight.position.set(200, 300, 200);
-    scene.add(pointLight);
-
-    const dirLight = new THREE.DirectionalLight(0x38bdf8, 1.2);
-    dirLight.position.set(-200, -200, -200);
-    scene.add(dirLight);
-
-    // 5. Starfield Universe
-    if (isDarkMode) {
-      const starGeometry = new THREE.BufferGeometry();
-      const starCount = 1000;
-      const starPositions = new Float32Array(starCount * 3);
-      for (let i = 0; i < starCount * 3; i += 3) {
-        starPositions[i] = (Math.random() - 0.5) * 2600;
-        starPositions[i + 1] = (Math.random() - 0.5) * 2600;
-        starPositions[i + 2] = (Math.random() - 0.5) * 2600;
-      }
-      starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
-      const starMaterial = new THREE.PointsMaterial({
-        color: 0xc4b5fd,
-        size: 2.0,
-        transparent: true,
-        opacity: 0.5,
-      });
-      const starField = new THREE.Points(starGeometry, starMaterial);
-      scene.add(starField);
-    }
-
-    // 6. Node & Edge Groups
-    const edgesGroup = new THREE.Group();
-    edgesGroupRef.current = edgesGroup;
-    scene.add(edgesGroup);
-
-    const nodesGroup = new THREE.Group();
-    nodesGroupRef.current = nodesGroup;
-    scene.add(nodesGroup);
-
-    // Signal that scene is ready to populate
-    setSceneReady((c) => c + 1);
-
-    // Animation & 3D Physics Loop
     let animationFrameId: number;
     let physicsTick = 0;
 
-    const animate = () => {
-      animationFrameId = requestAnimationFrame(animate);
+    const render = () => {
+      animationFrameId = requestAnimationFrame(render);
 
-      // 3D Physics Simulation (Wide-Area Spacing)
+      const width = container.clientWidth || 900;
+      const height = container.clientHeight || 650;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+      if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
+        canvas.width = width * dpr;
+        canvas.height = height * dpr;
+      }
+
+      ctx.save();
+      ctx.scale(dpr, dpr);
+
+      const nodes = nodesDataRef.current;
+      const edges = edgesDataRef.current;
+      const stars = starsRef.current;
+      const hoveredId = hoveredNodeIdRef.current;
+      const hoveredNode = hoveredId ? nodes.find((n) => n.id === hoveredId) : null;
+      const connectedSet = hoveredNode ? hoveredNode.connectedNodeIds : null;
+
+      // 1. 3D Force Physics Simulation
       if (physicsTick < 350) {
         physicsTick++;
-        const nodes = nodesDataRef.current;
-        const edges = edgesDataRef.current;
         const nMap = new Map<string, Node3DData>();
         nodes.forEach((n) => nMap.set(n.id, n));
 
-        // 1. 3D Coulomb Repulsion
         const repulsionStrength = 75000;
         const minDist = 60;
 
+        // Coulomb repulsion
         for (let i = 0; i < nodes.length; i++) {
           for (let j = i + 1; j < nodes.length; j++) {
             const a = nodes[i];
@@ -405,7 +320,7 @@ export const KnowledgeGraph3DView: React.FC<KnowledgeGraph3DViewProps> = ({
           }
         }
 
-        // 2. 3D Spring Attraction along Links
+        // Spring attraction
         for (const edge of edges) {
           const src = nMap.get(edge.source);
           const tgt = nMap.get(edge.target);
@@ -431,237 +346,258 @@ export const KnowledgeGraph3DView: React.FC<KnowledgeGraph3DViewProps> = ({
           }
         }
 
-        // 3. Center Gravity & Damping
+        // Centering gravity & damping
         const damping = 0.88;
         const centerGravity = 0.0004;
-
         for (const node of nodes) {
           node.vx = (node.vx - node.x * centerGravity) * damping;
           node.vy = (node.vy - node.y * centerGravity) * damping;
           node.vz = (node.vz - node.z * centerGravity) * damping;
-
           node.x += node.vx;
           node.y += node.vy;
           node.z += node.vz;
-
-          if (node.mesh) {
-            node.mesh.position.set(node.x, node.y, node.z);
-          }
-          if (node.sprite) {
-            node.sprite.position.set(node.x, node.y + node.radius + 14, node.z);
-          }
-        }
-
-        // Update 3D Beam Mesh positions & orientations
-        for (const edge of edges) {
-          if (edge.cylinderMesh) {
-            const src = nMap.get(edge.source);
-            const tgt = nMap.get(edge.target);
-            if (src && tgt) {
-              const p1 = new THREE.Vector3(src.x, src.y, src.z);
-              const p2 = new THREE.Vector3(tgt.x, tgt.y, tgt.z);
-              const distance = p1.distanceTo(p2);
-              const mid = p1.clone().add(p2).multiplyScalar(0.5);
-
-              edge.cylinderMesh.position.copy(mid);
-              edge.cylinderMesh.scale.set(1, distance, 1);
-              edge.cylinderMesh.quaternion.setFromUnitVectors(
-                new THREE.Vector3(0, 1, 0),
-                p2.clone().sub(p1).normalize()
-              );
-            }
-          }
         }
       }
 
-      // Continuous Auto-Orbit using mutable ref
+      // 2. Auto-Orbit
       if (autoRotateRef.current && !isDraggingRef.current) {
         cameraSphericalRef.current.theta += 0.0016;
-        updateCameraFromSpherical();
       }
 
-      // Always render frame
-      renderer.render(scene, camera);
+      // 3. Clear Background
+      ctx.clearRect(0, 0, width, height);
+      if (isDarkMode) {
+        const bgGrad = ctx.createRadialGradient(
+          width / 2,
+          height / 2,
+          10,
+          width / 2,
+          height / 2,
+          Math.max(width, height) * 0.75
+        );
+        bgGrad.addColorStop(0, '#0f172a');
+        bgGrad.addColorStop(1, '#020617');
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(0, 0, width, height);
+      } else {
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillRect(0, 0, width, height);
+      }
+
+      // Camera Matrix Calculation
+      const { radius, theta, phi } = cameraSphericalRef.current;
+      const target = cameraTargetRef.current;
+      const cx = width / 2;
+      const cy = height / 2;
+      const fov = 750;
+
+      const cosT = Math.cos(theta);
+      const sinT = Math.sin(theta);
+      const cosP = Math.cos(phi);
+      const sinP = Math.sin(phi);
+
+      const project3D = (
+        wx: number,
+        wy: number,
+        wz: number
+      ): { sx: number; sy: number; sz: number; scale: number; visible: boolean } => {
+        // Translate relative to target
+        const rx = wx - target.x;
+        const ry = wy - target.y;
+        const rz = wz - target.z;
+
+        // Yaw rotation around Y (theta)
+        const x1 = rx * cosT - rz * sinT;
+        const z1 = rx * sinT + rz * cosT;
+        const y1 = ry;
+
+        // Pitch rotation around X (phi)
+        const y2 = y1 * sinP - z1 * cosP;
+        const z2 = y1 * cosP + z1 * sinP;
+        const x2 = x1;
+
+        const camZ = z2 + radius;
+        if (camZ <= 30) {
+          return { sx: 0, sy: 0, sz: camZ, scale: 0, visible: false };
+        }
+
+        const scale = fov / camZ;
+        const sx = cx + x2 * scale;
+        const sy = cy - y2 * scale;
+
+        return { sx, sy, sz: camZ, scale, visible: true };
+      };
+
+      // 4. Render Starfield (Dark mode only)
+      if (isDarkMode) {
+        for (const star of stars) {
+          const p = project3D(star.x, star.y, star.z);
+          if (p.visible && p.sx >= -20 && p.sx <= width + 20 && p.sy >= -20 && p.sy <= height + 20) {
+            ctx.fillStyle = `rgba(196, 181, 253, ${star.alpha * Math.min(1, p.scale * 1.5)})`;
+            ctx.beginPath();
+            ctx.arc(p.sx, p.sy, Math.max(0.6, star.size * Math.min(2, p.scale)), 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      }
+
+      // 5. Project Nodes
+      const nMap = new Map<string, Node3DData>();
+      for (const node of nodes) {
+        const p = project3D(node.x, node.y, node.z);
+        node.projX = p.sx;
+        node.projY = p.sy;
+        node.projZ = p.sz;
+        node.projR = Math.max(3, node.radius * p.scale);
+        node.visible = p.visible;
+        nMap.set(node.id, node);
+      }
+
+      // 6. Draw 3D Edges (Beams)
+      for (const edge of edges) {
+        const src = nMap.get(edge.source);
+        const tgt = nMap.get(edge.target);
+        if (!src || !tgt || !src.visible || !tgt.visible) continue;
+
+        const isEdgeHighlighted =
+          hoveredId && (edge.source === hoveredId || edge.target === hoveredId);
+        const isDimmed = hoveredId && !isEdgeHighlighted;
+
+        const avgZ = (src.projZ! + tgt.projZ!) / 2;
+        const depthAlpha = Math.max(0.12, Math.min(0.95, 1 - (avgZ - 300) / 1800));
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(src.projX!, src.projY!);
+        ctx.lineTo(tgt.projX!, tgt.projY!);
+
+        if (edge.isAi) {
+          // AI Connection Beam
+          ctx.strokeStyle = isDimmed
+            ? 'rgba(168, 85, 247, 0.1)'
+            : isEdgeHighlighted
+            ? '#38bdf8'
+            : `rgba(192, 132, 252, ${depthAlpha * 0.9})`;
+          ctx.lineWidth = Math.max(1, (isEdgeHighlighted ? 3.5 : 2) * (fov / avgZ));
+          ctx.setLineDash([5, 4]);
+        } else {
+          // WikiLink Beam
+          ctx.strokeStyle = isDimmed
+            ? isDarkMode
+              ? 'rgba(100, 116, 139, 0.08)'
+              : 'rgba(148, 163, 184, 0.12)'
+            : isEdgeHighlighted
+            ? '#38bdf8'
+            : isDarkMode
+            ? `rgba(148, 163, 184, ${depthAlpha * 0.75})`
+            : `rgba(100, 116, 139, ${depthAlpha * 0.7})`;
+          ctx.lineWidth = Math.max(1, (isEdgeHighlighted ? 3 : 1.5) * (fov / avgZ));
+        }
+
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // 7. Sort Nodes by Depth (Painter's algorithm: farthest first)
+      const sortedNodes = [...nodes].sort((a, b) => (b.projZ || 0) - (a.projZ || 0));
+
+      // 8. Draw 3D Spheres & Labels
+      for (const node of sortedNodes) {
+        if (!node.visible || node.projX === undefined || node.projY === undefined) continue;
+
+        const sx = node.projX;
+        const sy = node.projY;
+        const sr = node.projR || 10;
+        const isActive = node.id === activePageId;
+        const isHovered = node.id === hoveredId;
+        const isConnected = connectedSet ? connectedSet.has(node.id) : false;
+        const isDimmed = hoveredId && !isHovered && !isConnected;
+
+        ctx.save();
+
+        if (isDimmed) {
+          ctx.globalAlpha = 0.2;
+        }
+
+        // Active / Hover Pulsing Halo Ring
+        if (isActive || isHovered) {
+          ctx.beginPath();
+          ctx.arc(sx, sy, sr * 1.5, 0, Math.PI * 2);
+          ctx.strokeStyle = isHovered ? '#38bdf8' : node.color || '#a855f7';
+          ctx.lineWidth = Math.max(2, 2.5 * (fov / (node.projZ || 600)));
+          ctx.stroke();
+        }
+
+        // 3D Sphere Shading with Radial Gradient
+        const grad = ctx.createRadialGradient(
+          sx - sr * 0.35,
+          sy - sr * 0.35,
+          sr * 0.1,
+          sx,
+          sy,
+          sr
+        );
+
+        const baseColor = node.color || '#8b5cf6';
+        grad.addColorStop(0, '#ffffff');
+        grad.addColorStop(0.3, baseColor);
+        grad.addColorStop(1, isDarkMode ? '#090d16' : '#1e293b');
+
+        ctx.beginPath();
+        ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        // Node Border
+        ctx.strokeStyle = isHovered ? '#38bdf8' : baseColor;
+        ctx.lineWidth = Math.max(1, 1.5 * (fov / (node.projZ || 600)));
+        ctx.stroke();
+
+        // Node Title Labels
+        if (showLabelsRef.current || isHovered || isActive) {
+          const fontSize = Math.max(9, Math.min(13, 11 * (fov / (node.projZ || 600))));
+          ctx.font = `600 ${fontSize}px system-ui, -apple-system, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+
+          const text = node.title || 'Untitled Note';
+          const textMetrics = ctx.measureText(text);
+          const paddingX = 8;
+          const paddingY = 4;
+          const pillW = textMetrics.width + paddingX * 2;
+          const pillH = fontSize + paddingY * 2;
+          const pillX = sx - pillW / 2;
+          const pillY = sy + sr + 6;
+
+          // Glass pill background
+          ctx.beginPath();
+          ctx.roundRect(pillX, pillY, pillW, pillH, 6);
+          ctx.fillStyle = isDarkMode ? 'rgba(15, 23, 42, 0.92)' : 'rgba(255, 255, 255, 0.94)';
+          ctx.fill();
+
+          ctx.strokeStyle = isHovered ? '#38bdf8' : isDarkMode ? 'rgba(51, 65, 85, 0.8)' : 'rgba(203, 213, 225, 0.8)';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          // Text content
+          ctx.fillStyle = isDarkMode ? '#f8fafc' : '#0f172a';
+          ctx.fillText(text, sx, pillY + pillH / 2);
+        }
+
+        ctx.restore();
+      }
+
+      ctx.restore();
     };
 
-    animate();
-
-    const handleResize = () => {
-      if (!mount || !renderer || !camera) return;
-      const w = mount.clientWidth;
-      const h = mount.clientHeight;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-    };
-
-    const resizeObserver = new ResizeObserver(handleResize);
-    resizeObserver.observe(mount);
+    render();
 
     return () => {
       cancelAnimationFrame(animationFrameId);
-      resizeObserver.disconnect();
-      if (renderer.domElement && mount.contains(renderer.domElement)) {
-        mount.removeChild(renderer.domElement);
-      }
-      renderer.dispose();
     };
-  }, [isDarkMode, updateCameraFromSpherical]);
+  }, [isDarkMode, graphNodes, graphEdges]);
 
-  // Re-populate 3D Meshes when graph data changes or scene initializes
-  useEffect(() => {
-    const scene = sceneRef.current;
-    const nodesGroup = nodesGroupRef.current;
-    const edgesGroup = edgesGroupRef.current;
-    if (!scene || !nodesGroup || !edgesGroup) return;
-
-    // Clear old meshes
-    while (nodesGroup.children.length > 0) {
-      const obj = nodesGroup.children[0];
-      nodesGroup.remove(obj);
-    }
-    while (edgesGroup.children.length > 0) {
-      const obj = edgesGroup.children[0];
-      edgesGroup.remove(obj);
-    }
-
-    const nMap = new Map<string, Node3DData>();
-    graphNodes.forEach((n) => nMap.set(n.id, n));
-
-    const sphereGeo = new THREE.SphereGeometry(1, 28, 28);
-    const cylinderGeo = new THREE.CylinderGeometry(1.4, 1.4, 1, 8);
-
-    // 1. Build 3D Solid Glowing Beams (Thick & Visible)
-    graphEdges.forEach((edge) => {
-      const src = nMap.get(edge.source);
-      const tgt = nMap.get(edge.target);
-      if (!src || !tgt) return;
-
-      const colorHex = edge.isAi ? 0xc084fc : isDarkMode ? 0x64748b : 0x94a3b8;
-      const material = new THREE.MeshStandardMaterial({
-        color: colorHex,
-        emissive: edge.isAi ? 0x9333ea : isDarkMode ? 0x334155 : 0x64748b,
-        roughness: 0.4,
-        metalness: 0.3,
-        transparent: true,
-        opacity: edge.isAi ? 0.9 : 0.65,
-      });
-
-      const cylinder = new THREE.Mesh(cylinderGeo, material);
-      const p1 = new THREE.Vector3(src.x, src.y, src.z);
-      const p2 = new THREE.Vector3(tgt.x, tgt.y, tgt.z);
-      const distance = p1.distanceTo(p2);
-      const mid = p1.clone().add(p2).multiplyScalar(0.5);
-
-      cylinder.position.copy(mid);
-      cylinder.scale.set(edge.isAi ? 1.6 : 1.2, distance, edge.isAi ? 1.6 : 1.2);
-      cylinder.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), p2.clone().sub(p1).normalize());
-
-      edge.cylinderMesh = cylinder;
-      edgesGroup.add(cylinder);
-    });
-
-    // 2. Build 3D Node Spheres & Text Labels
-    graphNodes.forEach((node) => {
-      const isActive = node.id === activePageId;
-      const baseColor = new THREE.Color(node.color || '#8b5cf6');
-
-      const material = new THREE.MeshStandardMaterial({
-        color: baseColor,
-        emissive: isActive ? baseColor.clone().multiplyScalar(0.8) : baseColor.clone().multiplyScalar(0.3),
-        roughness: 0.25,
-        metalness: 0.35,
-      });
-
-      const mesh = new THREE.Mesh(sphereGeo, material);
-      mesh.scale.set(node.radius, node.radius, node.radius);
-      mesh.position.set(node.x, node.y, node.z);
-      mesh.userData = { nodeId: node.id, nodeData: node };
-
-      node.mesh = mesh;
-      nodesGroup.add(mesh);
-
-      // Clean non-distorting 2D Ring around active node facing camera
-      if (isActive) {
-        const ringGeo = new THREE.RingGeometry(node.radius * 1.2, node.radius * 1.35, 32);
-        const ringMat = new THREE.MeshBasicMaterial({
-          color: baseColor,
-          side: THREE.DoubleSide,
-          transparent: true,
-          opacity: 0.6,
-        });
-        const ringMesh = new THREE.Mesh(ringGeo, ringMat);
-        ringMesh.position.set(node.x, node.y, node.z);
-        ringMesh.lookAt(cameraRef.current ? cameraRef.current.position : new THREE.Vector3(0, 0, 1));
-        nodesGroup.add(ringMesh);
-      }
-
-      // 3D Text Billboard Sprite
-      const sprite = createTextSprite(node.title, isDarkMode, node.color);
-      sprite.position.set(node.x, node.y + node.radius + 14, node.z);
-      sprite.visible = showLabels;
-      node.sprite = sprite;
-      nodesGroup.add(sprite);
-    });
-  }, [graphNodes, graphEdges, activePageId, isDarkMode, sceneReady]);
-
-  // Toggle label visibility without rebuilding the scene
-  useEffect(() => {
-    graphNodes.forEach((node) => {
-      if (node.sprite) {
-        node.sprite.visible = showLabels;
-      }
-    });
-  }, [showLabels, graphNodes]);
-
-  // Highlight connections on hover
-  useEffect(() => {
-    const nodes = nodesDataRef.current;
-    const edges = edgesDataRef.current;
-    const hoveredId = hoveredNodeId;
-
-    if (!hoveredId) {
-      nodes.forEach((n) => {
-        if (n.mesh) {
-          (n.mesh.material as THREE.MeshStandardMaterial).opacity = 1.0;
-          (n.mesh.material as THREE.MeshStandardMaterial).transparent = false;
-        }
-        if (n.sprite) n.sprite.material.opacity = 1.0;
-      });
-      edges.forEach((e) => {
-        if (e.cylinderMesh) {
-          (e.cylinderMesh.material as THREE.MeshStandardMaterial).opacity = e.isAi ? 0.9 : 0.65;
-          (e.cylinderMesh.material as THREE.MeshStandardMaterial).emissive.setHex(
-            e.isAi ? 0x9333ea : isDarkMode ? 0x334155 : 0x64748b
-          );
-        }
-      });
-      return;
-    }
-
-    const hoveredNode = nodes.find((n) => n.id === hoveredId);
-    const connectedSet = hoveredNode ? hoveredNode.connectedNodeIds : new Set<string>();
-
-    nodes.forEach((n) => {
-      const isMatch = n.id === hoveredId || connectedSet.has(n.id);
-      if (n.mesh) {
-        (n.mesh.material as THREE.MeshStandardMaterial).transparent = !isMatch;
-        (n.mesh.material as THREE.MeshStandardMaterial).opacity = isMatch ? 1.0 : 0.2;
-      }
-      if (n.sprite) n.sprite.material.opacity = isMatch ? 1.0 : 0.15;
-    });
-
-    edges.forEach((e) => {
-      const isConnected = e.source === hoveredId || e.target === hoveredId;
-      if (e.cylinderMesh) {
-        (e.cylinderMesh.material as THREE.MeshStandardMaterial).opacity = isConnected ? 1.0 : 0.1;
-        if (isConnected) {
-          (e.cylinderMesh.material as THREE.MeshStandardMaterial).emissive.setHex(0x38bdf8);
-        }
-      }
-    });
-  }, [hoveredNodeId, isDarkMode]);
-
+  // Pointer & Drag Handlers
   const handlePointerDown = (e: React.PointerEvent) => {
     isDraggingRef.current = true;
     isRightClickRef.current = e.button === 2 || e.shiftKey;
@@ -669,23 +605,24 @@ export const KnowledgeGraph3DView: React.FC<KnowledgeGraph3DViewProps> = ({
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    const mount = mountRef.current;
-    if (!mount || !cameraRef.current || !nodesGroupRef.current) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-    const rect = mount.getBoundingClientRect();
-    mouseRef.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    mouseRef.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
 
-    // Orbit or Pan
     if (isDraggingRef.current) {
       const deltaX = e.clientX - previousMousePositionRef.current.x;
       const deltaY = e.clientY - previousMousePositionRef.current.y;
 
       if (isRightClickRef.current) {
+        // Pan Target
         const panSpeed = 0.65;
         cameraTargetRef.current.x -= deltaX * panSpeed;
         cameraTargetRef.current.y += deltaY * panSpeed;
       } else {
+        // Orbit Angles
         cameraSphericalRef.current.theta -= deltaX * 0.006;
         cameraSphericalRef.current.phi = Math.max(
           0.05,
@@ -693,27 +630,33 @@ export const KnowledgeGraph3DView: React.FC<KnowledgeGraph3DViewProps> = ({
         );
       }
 
-      updateCameraFromSpherical();
       previousMousePositionRef.current = { x: e.clientX, y: e.clientY };
       return;
     }
 
-    // Raycast for Hover
-    raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
-    const intersects = raycasterRef.current.intersectObjects(nodesGroupRef.current.children, false);
+    // Raycast / Hit-test 2D projected node positions (front to back)
+    const nodes = nodesDataRef.current;
+    let hitNode: Node3DData | null = null;
+    let closestZ = Infinity;
 
-    if (intersects.length > 0) {
-      const hit = intersects.find((hitObj) => hitObj.object.userData?.nodeId);
-      if (hit) {
-        const nodeId = hit.object.userData.nodeId;
-        setHoveredNodeId(nodeId);
-        mount.style.cursor = 'pointer';
-        return;
+    for (const node of nodes) {
+      if (!node.visible || node.projX === undefined || node.projY === undefined) continue;
+      const hitRadius = Math.max(14, (node.projR || 10) + 4);
+      const dist = Math.hypot(mouseX - node.projX, mouseY - node.projY);
+
+      if (dist <= hitRadius && (node.projZ || 0) < closestZ) {
+        closestZ = node.projZ || 0;
+        hitNode = node;
       }
     }
 
-    setHoveredNodeId(null);
-    mount.style.cursor = isDraggingRef.current ? 'grabbing' : 'grab';
+    if (hitNode) {
+      setHoveredNodeId(hitNode.id);
+      canvas.style.cursor = 'pointer';
+    } else {
+      setHoveredNodeId(null);
+      canvas.style.cursor = isDraggingRef.current ? 'grabbing' : 'grab';
+    }
   };
 
   const handlePointerUp = () => {
@@ -723,43 +666,55 @@ export const KnowledgeGraph3DView: React.FC<KnowledgeGraph3DViewProps> = ({
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     const zoomFactor = e.deltaY < 0 ? 0.9 : 1.1;
-    cameraSphericalRef.current.radius = Math.max(100, Math.min(2000, cameraSphericalRef.current.radius * zoomFactor));
-    updateCameraFromSpherical();
+    cameraSphericalRef.current.radius = Math.max(
+      150,
+      Math.min(2000, cameraSphericalRef.current.radius * zoomFactor)
+    );
   };
 
   const handleClick = (e: React.MouseEvent) => {
-    const mount = mountRef.current;
-    if (!mount || !cameraRef.current || !nodesGroupRef.current) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-    const rect = mount.getBoundingClientRect();
-    mouseRef.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    mouseRef.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
 
-    raycasterRef.current.setFromCamera(mouseRef.current, cameraRef.current);
-    const intersects = raycasterRef.current.intersectObjects(nodesGroupRef.current.children, false);
+    const nodes = nodesDataRef.current;
+    let hitNode: Node3DData | null = null;
+    let closestZ = Infinity;
 
-    if (intersects.length > 0) {
-      const hit = intersects.find((hitObj) => hitObj.object.userData?.nodeId);
-      if (hit) {
-        const data: Node3DData = hit.object.userData.nodeData;
-        setSelectedNodeData(data);
-        return;
+    for (const node of nodes) {
+      if (!node.visible || node.projX === undefined || node.projY === undefined) continue;
+      const hitRadius = Math.max(14, (node.projR || 10) + 4);
+      const dist = Math.hypot(mouseX - node.projX, mouseY - node.projY);
+
+      if (dist <= hitRadius && (node.projZ || 0) < closestZ) {
+        closestZ = node.projZ || 0;
+        hitNode = node;
       }
     }
-    setSelectedNodeData(null);
+
+    if (hitNode) {
+      setSelectedNodeData(hitNode);
+    } else {
+      setSelectedNodeData(null);
+    }
   };
 
   const handleResetCamera = () => {
     cameraSphericalRef.current = { radius: 650, theta: Math.PI / 4, phi: Math.PI / 3 };
-    cameraTargetRef.current.set(0, 0, 0);
-    updateCameraFromSpherical();
+    cameraTargetRef.current = { x: 0, y: 0, z: 0 };
   };
 
   return (
-    <div className="flex-1 w-full h-full relative overflow-hidden select-none bg-slate-950">
-      {/* 3D WebGL Canvas Viewport */}
-      <div
-        ref={mountRef}
+    <div
+      ref={containerRef}
+      className="flex-1 w-full h-full relative overflow-hidden select-none bg-slate-950"
+    >
+      {/* 3D Canvas Viewport */}
+      <canvas
+        ref={canvasRef}
         className="w-full h-full block cursor-grab active:cursor-grabbing"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}

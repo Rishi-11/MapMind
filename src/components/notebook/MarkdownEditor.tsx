@@ -78,16 +78,43 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Sync internal state when active page changes
+  const pageIdRef = useRef(page.id);
+  const titleRef = useRef(title);
+  const onUpdateContentRef = useRef(onUpdateContent);
+  const onUpdateTitleRef = useRef(onUpdateTitle);
+
+  // Keep callback and state refs fresh on every render
   useEffect(() => {
+    pageIdRef.current = page.id;
+    titleRef.current = title;
+    onUpdateContentRef.current = onUpdateContent;
+    onUpdateTitleRef.current = onUpdateTitle;
+  });
+
+  // Sync internal state and clean up pending timers when active page changes or unmounts
+  useEffect(() => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
     setTitle(page.title);
     setContent(page.content);
-  }, [page.id]);
+    setIsSaving(false);
+    setAutocompleteOpen(false);
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+    };
+  }, [page.id, page.title, page.content]);
 
   const { properties, body } = useMemo(() => parseFrontmatter(content), [content]);
 
   // Debounced auto-save handler & Auto-Title sync from "# Heading"
   const handleContentChange = (newContent: string) => {
+    const targetPageId = page.id;
     setContent(newContent);
     setIsSaving(true);
 
@@ -100,13 +127,15 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       const firstHeadingMatch = newContent.match(/(?:^|\n)#\s+([^\n#]+)/);
       if (firstHeadingMatch) {
         const extractedTitle = firstHeadingMatch[1].trim();
-        if (extractedTitle && extractedTitle !== title) {
+        if (extractedTitle && extractedTitle !== titleRef.current) {
           setTitle(extractedTitle);
-          onUpdateTitle(page.id, extractedTitle);
+          titleRef.current = extractedTitle;
+          onUpdateTitleRef.current(targetPageId, extractedTitle);
         }
       }
-      onUpdateContent(page.id, newContent);
+      onUpdateContentRef.current(targetPageId, newContent);
       setIsSaving(false);
+      saveTimeoutRef.current = null;
     }, 350);
 
     // Check for wiki-link trigger "[["
@@ -131,6 +160,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
 
   const handleTitleChange = (newTitle: string) => {
     setTitle(newTitle);
+    titleRef.current = newTitle;
     onUpdateTitle(page.id, newTitle);
 
     // If note starts with a top level heading # OldTitle, keep markdown heading in sync

@@ -78,9 +78,41 @@ export async function enqueueSyncOperation(
 ): Promise<SyncQueueItem> {
   const db = await getSyncDb();
 
+  // If item is DELETE, purge all pending CREATE and UPDATE operations for this object
+  if (item.operation === 'DELETE_PAGE' || item.operation === 'DELETE_NOTEBOOK') {
+    const existing = (await db.getAllFromIndex(QUEUE_STORE, 'by_user', item.userId)) as SyncQueueItem[];
+    const pendingForObj = existing.filter((op) => op.objectId === item.objectId);
+    const hadPendingCreate = pendingForObj.some((op) => op.operation.startsWith('CREATE'));
+
+    const tx = db.transaction(QUEUE_STORE, 'readwrite');
+    for (const op of pendingForObj) {
+      await tx.store.delete(op.requestId);
+    }
+    await tx.done;
+
+    // If this object was only created locally and not yet synced to cloud, we do not need to send DELETE either
+    if (hadPendingCreate && pendingForObj.length === 1) {
+      return {
+        ...item,
+        requestId: generateSecureId('req'),
+        retries: 0,
+      };
+    }
+  }
+
   // If there is already a pending UPDATE operation for this object, replace it with latest payload
   if (item.operation === 'UPDATE_PAGE' || item.operation === 'UPDATE_NOTEBOOK') {
     const existing = (await db.getAllFromIndex(QUEUE_STORE, 'by_user', item.userId)) as SyncQueueItem[];
+    // If there is a pending DELETE for this object, reject the UPDATE so it cannot resurrect the deleted item
+    const hasPendingDelete = existing.some((op) => op.objectId === item.objectId && op.operation.startsWith('DELETE'));
+    if (hasPendingDelete) {
+      return {
+        ...item,
+        requestId: generateSecureId('req'),
+        retries: 0,
+      };
+    }
+
     const match = existing.find((op) => op.objectId === item.objectId && op.operation === item.operation);
     if (match) {
       const updated: SyncQueueItem = {
