@@ -20,8 +20,9 @@ import {
   ArrowDown,
   Check,
   X,
+  GripVertical,
 } from 'lucide-react';
-import { Workspace, Page } from '@/types/notebook';
+import { Workspace, Page, Section, Notebook } from '@/types/notebook';
 import { extractAllPageTags } from '@/lib/notebook/links';
 
 interface NotebookSidebarProps {
@@ -43,6 +44,7 @@ interface NotebookSidebarProps {
   onReorderNotebooks?: (notebookId: string, direction: 'up' | 'down') => void;
   onReorderSections?: (notebookId: string, sectionId: string, direction: 'up' | 'down') => void;
   onReorderPages?: (sectionId: string, pageId: string, direction: 'up' | 'down') => void;
+  onMovePage?: (pageId: string, targetNotebookId: string, targetSectionId: string, targetIndex?: number) => void;
   onToggleFavorite?: (pageId: string) => void;
   onOpenDailyNote: () => void;
   onOpenTasksView: () => void;
@@ -72,6 +74,7 @@ export const NotebookSidebar: React.FC<NotebookSidebarProps> = ({
   onReorderNotebooks,
   onReorderSections,
   onReorderPages,
+  onMovePage,
   onToggleFavorite,
   onOpenDailyNote,
   onOpenTasksView,
@@ -85,6 +88,20 @@ export const NotebookSidebar: React.FC<NotebookSidebarProps> = ({
   const [expandedNotebooks, setExpandedNotebooks] = useState<Record<string, boolean>>({});
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const [isPinnedExpanded, setIsPinnedExpanded] = useState(true);
+
+  // Drag and Drop States
+  const [draggedPage, setDraggedPage] = useState<{
+    pageId: string;
+    notebookId: string;
+    sectionId: string;
+  } | null>(null);
+  const [dragOverSectionId, setDragOverSectionId] = useState<string | null>(null);
+  const [dragOverNotebookId, setDragOverNotebookId] = useState<string | null>(null);
+  const [dragOverPageTarget, setDragOverPageTarget] = useState<{
+    pageId: string;
+    sectionId: string;
+    position: 'before' | 'after';
+  } | null>(null);
 
   // Rename states
   const [editingNotebookId, setEditingNotebookId] = useState<string | null>(null);
@@ -104,6 +121,178 @@ export const NotebookSidebar: React.FC<NotebookSidebarProps> = ({
 
   const [activeSectionAddModal, setActiveSectionAddModal] = useState<string | null>(null);
   const [newSectionName, setNewSectionName] = useState('');
+
+  // Drag-and-Drop Event Handlers
+  const handlePageDragStart = (
+    e: React.DragEvent,
+    page: Page,
+    notebookId: string,
+    sectionId: string
+  ) => {
+    if (editingPageId === page.id) {
+      e.preventDefault();
+      return;
+    }
+    const payload = { pageId: page.id, notebookId, sectionId };
+    e.dataTransfer.setData('application/json', JSON.stringify(payload));
+    e.dataTransfer.effectAllowed = 'move';
+    setDraggedPage(payload);
+  };
+
+  const handlePageDragEnd = () => {
+    setDraggedPage(null);
+    setDragOverSectionId(null);
+    setDragOverNotebookId(null);
+    setDragOverPageTarget(null);
+  };
+
+  const handlePageDragOver = (
+    e: React.DragEvent,
+    targetPage: Page,
+    _targetNotebookId: string,
+    targetSection: Section
+  ) => {
+    if (!draggedPage || draggedPage.pageId === targetPage.id) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    const position = e.clientY < midY ? 'before' : 'after';
+
+    setDragOverPageTarget({
+      pageId: targetPage.id,
+      sectionId: targetSection.id,
+      position,
+    });
+    setDragOverSectionId(targetSection.id);
+  };
+
+  const handlePageDrop = (
+    e: React.DragEvent,
+    targetPage: Page,
+    targetNotebookId: string,
+    targetSection: Section
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    let dragData = draggedPage;
+    if (!dragData) {
+      try {
+        const raw = e.dataTransfer.getData('application/json');
+        if (raw) dragData = JSON.parse(raw);
+      } catch (err) {
+        console.warn('Failed to parse drag data:', err);
+      }
+    }
+
+    if (!dragData || !onMovePage) {
+      handlePageDragEnd();
+      return;
+    }
+
+    if (dragData.pageId === targetPage.id) {
+      handlePageDragEnd();
+      return;
+    }
+
+    const position = dragOverPageTarget?.pageId === targetPage.id
+      ? dragOverPageTarget.position
+      : 'after';
+
+    let targetIndex: number;
+    const isSameSection = dragData.sectionId === targetSection.id;
+
+    if (isSameSection) {
+      const draggedIdx = targetSection.pages.findIndex((p) => p.id === dragData!.pageId);
+      const targetPageIdx = targetSection.pages.findIndex((p) => p.id === targetPage.id);
+
+      if (draggedIdx === -1 || targetPageIdx === -1) {
+        targetIndex = targetSection.pages.length;
+      } else if (position === 'before') {
+        targetIndex = draggedIdx < targetPageIdx ? targetPageIdx - 1 : targetPageIdx;
+      } else {
+        targetIndex = draggedIdx < targetPageIdx ? targetPageIdx : targetPageIdx + 1;
+      }
+    } else {
+      const targetPageIdx = targetSection.pages.findIndex((p) => p.id === targetPage.id);
+      if (targetPageIdx === -1) {
+        targetIndex = targetSection.pages.length;
+      } else if (position === 'before') {
+        targetIndex = targetPageIdx;
+      } else {
+        targetIndex = targetPageIdx + 1;
+      }
+    }
+
+    onMovePage(dragData.pageId, targetNotebookId, targetSection.id, targetIndex);
+    handlePageDragEnd();
+  };
+
+  const handleSectionDrop = (
+    e: React.DragEvent,
+    targetNotebookId: string,
+    targetSection: Section
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    let dragData = draggedPage;
+    if (!dragData) {
+      try {
+        const raw = e.dataTransfer.getData('application/json');
+        if (raw) dragData = JSON.parse(raw);
+      } catch (err) {
+        console.warn('Failed to parse drag data:', err);
+      }
+    }
+
+    if (!dragData || !onMovePage) {
+      handlePageDragEnd();
+      return;
+    }
+
+    if (dragData.sectionId === targetSection.id && dragData.notebookId === targetNotebookId) {
+      handlePageDragEnd();
+      return;
+    }
+
+    onMovePage(dragData.pageId, targetNotebookId, targetSection.id);
+    handlePageDragEnd();
+  };
+
+  const handleNotebookDrop = (
+    e: React.DragEvent,
+    targetNotebook: Notebook
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    let dragData = draggedPage;
+    if (!dragData) {
+      try {
+        const raw = e.dataTransfer.getData('application/json');
+        if (raw) dragData = JSON.parse(raw);
+      } catch (err) {
+        console.warn('Failed to parse drag data:', err);
+      }
+    }
+
+    if (!dragData || !onMovePage || targetNotebook.sections.length === 0) {
+      handlePageDragEnd();
+      return;
+    }
+
+    const firstSection = targetNotebook.sections[0];
+    if (dragData.notebookId === targetNotebook.id && dragData.sectionId === firstSection.id) {
+      handlePageDragEnd();
+      return;
+    }
+
+    onMovePage(dragData.pageId, targetNotebook.id, firstSection.id);
+    handlePageDragEnd();
+  };
 
   // Pinned Notes aggregation
   const pinnedPages = useMemo(() => {
@@ -310,17 +499,25 @@ export const NotebookSidebar: React.FC<NotebookSidebarProps> = ({
               <div className="space-y-0.5 ml-1">
                 {pinnedPages.map(({ page, notebookId, sectionId }) => {
                   const isPageActive = activePageId === page.id;
+                  const isBeingDragged = draggedPage?.pageId === page.id;
+
                   return (
                     <div
                       key={`pinned-${page.id}`}
+                      draggable={editingPageId !== page.id}
+                      onDragStart={(e) => handlePageDragStart(e, page, notebookId, sectionId)}
+                      onDragEnd={handlePageDragEnd}
                       onClick={() => onSelectPage(notebookId, sectionId, page.id)}
                       className={`flex items-center justify-between px-2 py-1 rounded text-xs cursor-pointer group transition-all ${
+                        isBeingDragged ? 'opacity-40 scale-[0.98]' : ''
+                      } ${
                         isPageActive
                           ? 'bg-amber-500 text-white font-medium shadow-xs'
                           : 'text-slate-700 dark:text-slate-300 hover:bg-amber-50/60 dark:hover:bg-amber-950/30'
                       }`}
                     >
                       <div className="flex items-center gap-1.5 truncate flex-1">
+                        <GripVertical className="w-3 h-3 text-slate-400/70 opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing shrink-0 -ml-1" />
                         <Pin className={`w-3 h-3 shrink-0 ${isPageActive ? 'text-white fill-white' : 'text-amber-400 fill-amber-400'}`} />
                         <span className="truncate">{page.title}</span>
                       </div>
@@ -363,6 +560,7 @@ export const NotebookSidebar: React.FC<NotebookSidebarProps> = ({
               const containsActivePage = notebook.sections.some((s) => s.pages.some((p) => p.id === activePageId));
               const isNbExpanded = containsActivePage ? true : expandedNotebooks[notebook.id] !== false;
               const isNbActive = activeNotebookId === notebook.id || containsActivePage;
+              const isNbDropTarget = dragOverNotebookId === notebook.id && draggedPage?.notebookId !== notebook.id;
 
               return (
                 <div key={notebook.id} className="rounded-lg overflow-hidden">
@@ -405,8 +603,23 @@ export const NotebookSidebar: React.FC<NotebookSidebarProps> = ({
                   ) : (
                     <div
                       onClick={() => onSelectNotebook(notebook.id)}
-                      className={`flex items-center justify-between px-2 py-1.5 rounded-lg text-xs font-semibold cursor-pointer group transition-colors ${
-                        isNbActive
+                      onDragOver={(e) => {
+                        if (draggedPage && draggedPage.notebookId !== notebook.id) {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setDragOverNotebookId(notebook.id);
+                        }
+                      }}
+                      onDragLeave={(e) => {
+                        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                          if (dragOverNotebookId === notebook.id) setDragOverNotebookId(null);
+                        }
+                      }}
+                      onDrop={(e) => handleNotebookDrop(e, notebook)}
+                      className={`flex items-center justify-between px-2 py-1.5 rounded-lg text-xs font-semibold cursor-pointer group transition-all ${
+                        isNbDropTarget
+                          ? 'ring-2 ring-purple-500 bg-purple-100/90 dark:bg-purple-950/70 text-purple-900 dark:text-purple-200'
+                          : isNbActive
                           ? 'bg-purple-100/70 dark:bg-purple-950/40 text-purple-900 dark:text-purple-200'
                           : 'text-slate-700 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-800/60'
                       }`}
@@ -531,6 +744,7 @@ export const NotebookSidebar: React.FC<NotebookSidebarProps> = ({
                         const secContainsActivePage = section.pages.some((p) => p.id === activePageId);
                         const isSecExpanded = secContainsActivePage ? true : expandedSections[section.id] !== false;
                         const isSecActive = activeSectionId === section.id || secContainsActivePage;
+                        const isSecDropTarget = dragOverSectionId === section.id && (!dragOverPageTarget || dragOverPageTarget.sectionId !== section.id);
 
                         return (
                           <div key={section.id} className="space-y-0.5">
@@ -572,8 +786,23 @@ export const NotebookSidebar: React.FC<NotebookSidebarProps> = ({
                               </div>
                             ) : (
                               <div
-                                className={`flex items-center justify-between px-1.5 py-1 rounded text-xs font-medium cursor-pointer group transition-colors ${
-                                  isSecActive
+                                onDragOver={(e) => {
+                                  if (draggedPage) {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setDragOverSectionId(section.id);
+                                  }
+                                }}
+                                onDragLeave={(e) => {
+                                  if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                                    if (dragOverSectionId === section.id) setDragOverSectionId(null);
+                                  }
+                                }}
+                                onDrop={(e) => handleSectionDrop(e, notebook.id, section)}
+                                className={`flex items-center justify-between px-1.5 py-1 rounded text-xs font-medium cursor-pointer group transition-all ${
+                                  isSecDropTarget
+                                    ? 'ring-2 ring-purple-500 bg-purple-100/80 dark:bg-purple-950/60 text-purple-900 dark:text-purple-100'
+                                    : isSecActive
                                     ? 'text-purple-700 dark:text-purple-300 bg-slate-200/50 dark:bg-slate-800/50'
                                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/40 dark:hover:bg-slate-800/40'
                                 }`}
@@ -658,7 +887,43 @@ export const NotebookSidebar: React.FC<NotebookSidebarProps> = ({
 
                             {/* Pages inside Section */}
                             {isSecExpanded && (
-                              <div className="ml-3 pl-2 border-l border-slate-200 dark:border-slate-800 space-y-0.5">
+                              <div
+                                onDragOver={(e) => {
+                                  if (draggedPage) {
+                                    e.preventDefault();
+                                    setDragOverSectionId(section.id);
+                                  }
+                                }}
+                                onDrop={(e) => {
+                                  if (draggedPage && !dragOverPageTarget) {
+                                    handleSectionDrop(e, notebook.id, section);
+                                  }
+                                }}
+                                className={`ml-3 pl-2 border-l transition-colors space-y-0.5 ${
+                                  dragOverSectionId === section.id
+                                    ? 'border-purple-400 dark:border-purple-600'
+                                    : 'border-slate-200 dark:border-slate-800'
+                                }`}
+                              >
+                                {section.pages.length === 0 && (
+                                  <div
+                                    onDragOver={(e) => {
+                                      if (draggedPage) {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setDragOverSectionId(section.id);
+                                      }
+                                    }}
+                                    onDrop={(e) => handleSectionDrop(e, notebook.id, section)}
+                                    className={`py-2 px-2 text-center rounded border border-dashed text-[11px] transition-colors ${
+                                      dragOverSectionId === section.id
+                                        ? 'border-purple-500 bg-purple-50 dark:bg-purple-950/50 text-purple-600 dark:text-purple-300 font-medium'
+                                        : 'border-slate-200 dark:border-slate-800 text-slate-400'
+                                    }`}
+                                  >
+                                    {draggedPage ? 'Drop note here' : 'No notes yet'}
+                                  </div>
+                                )}
                                 {section.pages
                                   .filter((p) => {
                                     if (selectedTag) {
@@ -676,6 +941,9 @@ export const NotebookSidebar: React.FC<NotebookSidebarProps> = ({
                                   })
                                   .map((page, pageIdx, filteredList) => {
                                     const isPageActive = activePageId === page.id;
+                                    const isBeingDragged = draggedPage?.pageId === page.id;
+                                    const isDropTarget = dragOverPageTarget?.pageId === page.id && draggedPage?.pageId !== page.id;
+                                    const dropPosition = isDropTarget ? dragOverPageTarget.position : null;
 
                                     return editingPageId === page.id ? (
                                       <div key={`edit-${page.id}`} className="p-1 bg-purple-50 dark:bg-slate-800 rounded flex items-center gap-1 my-0.5">
@@ -715,14 +983,35 @@ export const NotebookSidebar: React.FC<NotebookSidebarProps> = ({
                                     ) : (
                                       <div
                                         key={page.id}
+                                        draggable={editingPageId !== page.id}
+                                        onDragStart={(e) => handlePageDragStart(e, page, notebook.id, section.id)}
+                                        onDragEnd={handlePageDragEnd}
+                                        onDragOver={(e) => handlePageDragOver(e, page, notebook.id, section)}
+                                        onDragLeave={(e) => {
+                                          if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                                            if (dragOverPageTarget?.pageId === page.id) setDragOverPageTarget(null);
+                                          }
+                                        }}
+                                        onDrop={(e) => handlePageDrop(e, page, notebook.id, section)}
                                         onClick={() => onSelectPage(notebook.id, section.id, page.id)}
-                                        className={`flex items-center justify-between px-2 py-1 rounded text-xs cursor-pointer group transition-all ${
-                                          isPageActive
-                                            ? 'bg-purple-600 text-white font-medium shadow-sm'
-                                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/60 dark:hover:bg-slate-800/60'
+                                        className={`relative flex items-center justify-between px-2 py-1 rounded text-xs cursor-pointer group transition-all ${
+                                          isBeingDragged
+                                            ? 'opacity-35 scale-[0.98] border border-dashed border-purple-400 dark:border-purple-500 bg-purple-50/50 dark:bg-purple-950/20'
+                                            : isDropTarget && dropPosition === 'before'
+                                            ? 'border-t-2 border-t-purple-600 dark:border-t-purple-400'
+                                            : isDropTarget && dropPosition === 'after'
+                                            ? 'border-b-2 border-b-purple-600 dark:border-b-purple-400'
+                                            : ''
+                                        } ${
+                                          isPageActive && !isBeingDragged
+                                            ? 'bg-purple-600 text-white font-medium shadow-xs'
+                                            : !isBeingDragged
+                                            ? 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/60 dark:hover:bg-slate-800/60'
+                                            : ''
                                         }`}
                                       >
-                                        <div className="flex items-center gap-1.5 truncate flex-1">
+                                        <div className="flex items-center gap-1 truncate flex-1">
+                                          <GripVertical className="w-3 h-3 text-slate-400/70 hover:text-slate-600 dark:hover:text-slate-200 opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing transition-opacity shrink-0 -ml-1 mr-0.5" />
                                           <FileText className={`w-3.5 h-3.5 shrink-0 ${isPageActive ? 'text-white' : 'text-slate-400'}`} />
                                           <span className="truncate">{page.title}</span>
                                         </div>

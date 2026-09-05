@@ -1901,6 +1901,93 @@ export function AppContent() {
     [persistWorkspace]
   );
 
+  // Drag-and-Drop Page Move across Sections and Notebooks
+  const handleMovePage = useCallback(
+    (pageId: string, targetNotebookId: string, targetSectionId: string, targetIndex?: number) => {
+      let movedPage: Page | null = null;
+      let targetSecName = '';
+
+      persistWorkspace((prev) => {
+        let pageToMove: Page | null = null;
+
+        // 1. Locate and extract the page from its current location
+        const notebooksWithoutPage = prev.notebooks.map((nb) => ({
+          ...nb,
+          sections: nb.sections.map((sec) => {
+            const found = sec.pages.find((p) => p.id === pageId);
+            if (found) {
+              pageToMove = { ...found };
+              return {
+                ...sec,
+                pages: sec.pages.filter((p) => p.id !== pageId),
+                updatedAt: new Date().toISOString(),
+              };
+            }
+            return sec;
+          }),
+        }));
+
+        if (!pageToMove) return prev;
+
+        const updatedPage: Page = {
+          ...(pageToMove as Page),
+          notebookId: targetNotebookId,
+          sectionId: targetSectionId,
+          updatedAt: new Date().toISOString(),
+        };
+        movedPage = updatedPage;
+
+        // 2. Insert into target section
+        let targetFound = false;
+        const finalNotebooks = notebooksWithoutPage.map((nb) => {
+          if (nb.id !== targetNotebookId) return nb;
+          return {
+            ...nb,
+            sections: nb.sections.map((sec) => {
+              if (sec.id !== targetSectionId) return sec;
+              targetFound = true;
+              targetSecName = sec.name;
+              const newPages = [...sec.pages];
+              if (
+                typeof targetIndex === 'number' &&
+                targetIndex >= 0 &&
+                targetIndex <= newPages.length
+              ) {
+                newPages.splice(targetIndex, 0, updatedPage);
+              } else {
+                newPages.push(updatedPage);
+              }
+              return {
+                ...sec,
+                pages: newPages,
+                updatedAt: new Date().toISOString(),
+              };
+            }),
+            updatedAt: new Date().toISOString(),
+          };
+        });
+
+        if (!targetFound) return prev;
+
+        const rawWorkspace = {
+          ...prev,
+          notebooks: finalNotebooks,
+          activeNotebookId: targetNotebookId,
+          activeSectionId: targetSectionId,
+          activePageId: pageId,
+        };
+        const { workspace: cleanWorkspace } = reconcileWorkspacePages(rawWorkspace);
+        return cleanWorkspace;
+      });
+
+      if (movedPage) {
+        queueCloudSyncOperation('UPDATE_PAGE', pageId, movedPage);
+        showNotification(`Moved note to "${targetSecName || 'section'}"`, 'success');
+      }
+    },
+    [persistWorkspace, queueCloudSyncOperation, showNotification]
+  );
+
   // Navigate to page by title or alias (from WikiLinks, Backlinks, etc.), auto-creating note if it does not exist
   const handleNavigateToPage = useCallback(
     (pageTitle: string) => {
@@ -2391,6 +2478,7 @@ export function AppContent() {
               onReorderNotebooks={handleReorderNotebooks}
               onReorderSections={handleReorderSections}
               onReorderPages={handleReorderPages}
+              onMovePage={handleMovePage}
               onToggleFavorite={handleToggleFavorite}
               onOpenDailyNote={handleOpenDailyNote}
               onOpenTasksView={() => setViewMode('tasks')}
