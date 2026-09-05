@@ -108,12 +108,48 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
 
   const { properties, body } = useMemo(() => parseFrontmatter(content), [content]);
 
-  // Debounced auto-save handler
+  // Debounced auto-save handler & Automatic Title inference for new/untitled notes
   const handleContentChange = (newContent: string) => {
     const targetPageId = page.id;
     setContent(newContent);
     dirtyContentRef.current = newContent;
     setIsSaving(true);
+
+    // Auto-detect title from first markdown heading or first line if note is untitled
+    const isCurrentlyUntitled =
+      !titleRef.current ||
+      titleRef.current === 'Untitled Note' ||
+      titleRef.current === 'Untitled Page' ||
+      titleRef.current.trim() === '';
+
+    if (isCurrentlyUntitled && newContent.trim().length > 0) {
+      const headingMatch = newContent.match(/(?:^|\n)#\s+([^\n#]+)/);
+      if (headingMatch && headingMatch[1].trim()) {
+        const extracted = headingMatch[1].trim();
+        setTitle(extracted);
+        titleRef.current = extracted;
+        onUpdateTitleRef.current(targetPageId, extracted);
+      } else {
+        const firstLine = newContent
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .find((l) => l.length > 0 && !l.startsWith('---'));
+        if (
+          firstLine &&
+          firstLine.length <= 60 &&
+          !firstLine.startsWith('- ') &&
+          !firstLine.startsWith('* ') &&
+          !firstLine.startsWith('> ')
+        ) {
+          const cleanLine = firstLine.replace(/^[#\s]+/, '').trim();
+          if (cleanLine && cleanLine !== titleRef.current) {
+            setTitle(cleanLine);
+            titleRef.current = cleanLine;
+            onUpdateTitleRef.current(targetPageId, cleanLine);
+          }
+        }
+      }
+    }
 
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
@@ -149,12 +185,28 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   const handleTitleChange = (newTitle: string) => {
     setTitle(newTitle);
     titleRef.current = newTitle;
-    onUpdateTitle(page.id, newTitle);
+    onUpdateTitle(page.id, newTitle || 'Untitled Note');
+
+    // If note content starts with top level heading # OldTitle, keep markdown heading in sync
+    if (content.match(/^#\s+[^\n]+/)) {
+      const updated = content.replace(/^#\s+[^\n]+/, `# ${newTitle}`);
+      setContent(updated);
+      dirtyContentRef.current = updated;
+      onUpdateContent(page.id, updated);
+    } else if (!content.trim() && newTitle.trim()) {
+      const initial = `# ${newTitle}\n\n`;
+      setContent(initial);
+      dirtyContentRef.current = initial;
+      onUpdateContent(page.id, initial);
+    }
   };
 
   const handleTitleBlur = () => {
-    if (title.trim() && title !== page.title) {
-      onUpdateTitle(page.id, title.trim());
+    const finalTitle = title.trim() || 'Untitled Note';
+    if (finalTitle !== page.title) {
+      setTitle(finalTitle);
+      titleRef.current = finalTitle;
+      onUpdateTitle(page.id, finalTitle);
     }
   };
 
@@ -1015,8 +1067,13 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
             type="text"
             value={title}
             onChange={(e) => handleTitleChange(e.target.value)}
+            onFocus={(e) => {
+              if (title === 'Untitled Note' || title === 'Untitled Page') {
+                e.target.select();
+              }
+            }}
             onBlur={handleTitleBlur}
-            placeholder="Untitled Page"
+            placeholder="Untitled Note"
             className="flex-1 text-2xl font-black text-slate-900 dark:text-white bg-transparent border-0 focus:outline-none placeholder-slate-300 dark:placeholder-slate-700 tracking-tight"
           />
 
