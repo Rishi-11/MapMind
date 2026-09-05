@@ -658,22 +658,69 @@ export function reconcileWorkspacePages(ws: Workspace): { workspace: Workspace; 
     }
   }
 
-  // 5. Ensure valid active selections without hijacking current active note
-  if (!cloned.activeNotebookId || !cloned.notebooks.some((n) => n.id === cloned.activeNotebookId)) {
-    cloned.activeNotebookId = cloned.notebooks[0]?.id || null;
+  // 5. Ensure valid active selections by resolving from activePageId first
+  let resolvedPage: Page | null = null;
+  let resolvedNb: Notebook | null = null;
+  let resolvedSec: Section | null = null;
+
+  if (cloned.activePageId) {
+    for (const nb of cloned.notebooks) {
+      for (const sec of nb.sections) {
+        const found = sec.pages.find((p) => p.id === cloned.activePageId);
+        if (found) {
+          resolvedPage = found;
+          resolvedSec = sec;
+          resolvedNb = nb;
+          break;
+        }
+      }
+      if (resolvedPage) break;
+    }
+  }
+
+  if (!resolvedPage && cloned.activeSectionId) {
+    for (const nb of cloned.notebooks) {
+      const sec = nb.sections.find((s) => s.id === cloned.activeSectionId);
+      if (sec && sec.pages.length > 0) {
+        resolvedPage = sec.pages[0];
+        resolvedSec = sec;
+        resolvedNb = nb;
+        break;
+      }
+    }
+  }
+
+  if (!resolvedPage && cloned.activeNotebookId) {
+    const nb = cloned.notebooks.find((n) => n.id === cloned.activeNotebookId);
+    if (nb && nb.sections.length > 0 && nb.sections[0].pages.length > 0) {
+      resolvedNb = nb;
+      resolvedSec = nb.sections[0];
+      resolvedPage = nb.sections[0].pages[0];
+    }
+  }
+
+  if (!resolvedPage && cloned.notebooks.length > 0) {
+    const firstNb = cloned.notebooks[0];
+    resolvedNb = firstNb;
+    if (firstNb.sections.length > 0) {
+      resolvedSec = firstNb.sections[0];
+      if (firstNb.sections[0].pages.length > 0) {
+        resolvedPage = firstNb.sections[0].pages[0];
+      }
+    }
+  }
+
+  if (resolvedNb && cloned.activeNotebookId !== resolvedNb.id) {
+    cloned.activeNotebookId = resolvedNb.id;
     changed = true;
   }
-  const activeNb = cloned.notebooks.find((n) => n.id === cloned.activeNotebookId);
-  if (activeNb) {
-    if (!cloned.activeSectionId || !activeNb.sections.some((s) => s.id === cloned.activeSectionId)) {
-      cloned.activeSectionId = activeNb.sections[0]?.id || null;
-      changed = true;
-    }
-    const activeSec = activeNb.sections.find((s) => s.id === cloned.activeSectionId);
-    if (activeSec && (!cloned.activePageId || !activeSec.pages.some((p) => p.id === cloned.activePageId))) {
-      cloned.activePageId = activeSec.pages[0]?.id || null;
-      changed = true;
-    }
+  if (resolvedSec && cloned.activeSectionId !== resolvedSec.id) {
+    cloned.activeSectionId = resolvedSec.id;
+    changed = true;
+  }
+  if (resolvedPage && cloned.activePageId !== resolvedPage.id) {
+    cloned.activePageId = resolvedPage.id;
+    changed = true;
   }
 
   return { workspace: cloned, changed };

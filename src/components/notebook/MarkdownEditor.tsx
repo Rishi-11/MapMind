@@ -82,6 +82,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   const titleRef = useRef(title);
   const onUpdateContentRef = useRef(onUpdateContent);
   const onUpdateTitleRef = useRef(onUpdateTitle);
+  const dirtyContentRef = useRef<string | null>(null);
 
   // Keep callback and state refs fresh on every render
   useEffect(() => {
@@ -91,31 +92,27 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     onUpdateTitleRef.current = onUpdateTitle;
   });
 
-  // Sync internal state and clean up pending timers when active page changes or unmounts
+  // Flush any pending unsaved edits when active page changes or component unmounts
   useEffect(() => {
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-      saveTimeoutRef.current = null;
-    }
-    setTitle(page.title);
-    setContent(page.content);
-    setIsSaving(false);
-    setAutocompleteOpen(false);
-
     return () => {
+      if (dirtyContentRef.current !== null && pageIdRef.current) {
+        onUpdateContentRef.current(pageIdRef.current, dirtyContentRef.current);
+        dirtyContentRef.current = null;
+      }
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
         saveTimeoutRef.current = null;
       }
     };
-  }, [page.id, page.title, page.content]);
+  }, [page.id]);
 
   const { properties, body } = useMemo(() => parseFrontmatter(content), [content]);
 
-  // Debounced auto-save handler & Auto-Title sync from "# Heading"
+  // Debounced auto-save handler
   const handleContentChange = (newContent: string) => {
     const targetPageId = page.id;
     setContent(newContent);
+    dirtyContentRef.current = newContent;
     setIsSaving(true);
 
     if (saveTimeoutRef.current) {
@@ -123,20 +120,11 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     }
 
     saveTimeoutRef.current = setTimeout(() => {
-      // Auto-sync page title if the user writes or updates "# Heading" in the markdown
-      const firstHeadingMatch = newContent.match(/(?:^|\n)#\s+([^\n#]+)/);
-      if (firstHeadingMatch) {
-        const extractedTitle = firstHeadingMatch[1].trim();
-        if (extractedTitle && extractedTitle !== titleRef.current) {
-          setTitle(extractedTitle);
-          titleRef.current = extractedTitle;
-          onUpdateTitleRef.current(targetPageId, extractedTitle);
-        }
-      }
       onUpdateContentRef.current(targetPageId, newContent);
+      dirtyContentRef.current = null;
       setIsSaving(false);
       saveTimeoutRef.current = null;
-    }, 350);
+    }, 400);
 
     // Check for wiki-link trigger "[["
     if (textareaRef.current) {
@@ -162,13 +150,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     setTitle(newTitle);
     titleRef.current = newTitle;
     onUpdateTitle(page.id, newTitle);
-
-    // If note starts with a top level heading # OldTitle, keep markdown heading in sync
-    if (content.match(/^#\s+[^\n]+/)) {
-      const updated = content.replace(/^#\s+[^\n]+/, `# ${newTitle}`);
-      setContent(updated);
-      onUpdateContent(page.id, updated);
-    }
   };
 
   const handleTitleBlur = () => {

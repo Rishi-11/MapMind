@@ -680,25 +680,56 @@ export function AppContent() {
         }
 
         // Clean & Reconcile while strictly preserving user's current active note
-        const currentActiveNbId = workspace.activeNotebookId;
-        const currentActiveSecId = workspace.activeSectionId;
-        const currentActivePgId = workspace.activePageId;
+        const currentActivePgId = currentWorkspaceRef.current?.activePageId || workspace.activePageId;
+        const currentActiveSecId = currentWorkspaceRef.current?.activeSectionId || workspace.activeSectionId;
+        const currentActiveNbId = currentWorkspaceRef.current?.activeNotebookId || workspace.activeNotebookId;
 
         const reconciled = reconcileWorkspacePages(updatedWorkspace);
         if (reconciled.changed || hasNewData) {
           updatedWorkspace = reconciled.workspace;
-          // Keep user on the note they are actively editing
-          if (currentActiveNbId && updatedWorkspace.notebooks.some((n) => n.id === currentActiveNbId)) {
-            updatedWorkspace.activeNotebookId = currentActiveNbId;
-            const curNb = updatedWorkspace.notebooks.find((n) => n.id === currentActiveNbId);
-            if (currentActiveSecId && curNb?.sections.some((s) => s.id === currentActiveSecId)) {
-              updatedWorkspace.activeSectionId = currentActiveSecId;
-              const curSec = curNb.sections.find((s) => s.id === currentActiveSecId);
-              if (currentActivePgId && curSec?.pages.some((p) => p.id === currentActivePgId)) {
-                updatedWorkspace.activePageId = currentActivePgId;
+
+          // Keep user on the exact note and section they are actively editing
+          let preserved = false;
+          if (currentActivePgId) {
+            for (const nb of updatedWorkspace.notebooks) {
+              for (const sec of nb.sections) {
+                const p = sec.pages.find((item) => item.id === currentActivePgId);
+                if (p) {
+                  updatedWorkspace.activeNotebookId = nb.id;
+                  updatedWorkspace.activeSectionId = sec.id;
+                  updatedWorkspace.activePageId = p.id;
+                  preserved = true;
+                  break;
+                }
+              }
+              if (preserved) break;
+            }
+          }
+
+          if (!preserved && currentActiveSecId) {
+            for (const nb of updatedWorkspace.notebooks) {
+              const sec = nb.sections.find((s) => s.id === currentActiveSecId);
+              if (sec && sec.pages.length > 0) {
+                updatedWorkspace.activeNotebookId = nb.id;
+                updatedWorkspace.activeSectionId = sec.id;
+                updatedWorkspace.activePageId = sec.pages[0].id;
+                preserved = true;
+                break;
               }
             }
           }
+
+          if (!preserved && currentActiveNbId) {
+            const nb = updatedWorkspace.notebooks.find((n) => n.id === currentActiveNbId);
+            if (nb && nb.sections.length > 0 && nb.sections[0].pages.length > 0) {
+              updatedWorkspace.activeNotebookId = nb.id;
+              updatedWorkspace.activeSectionId = nb.sections[0].id;
+              updatedWorkspace.activePageId = nb.sections[0].pages[0].id;
+              preserved = true;
+            }
+          }
+
+          currentWorkspaceRef.current = updatedWorkspace;
           setWorkspace(updatedWorkspace);
           await saveWorkspace(updatedWorkspace);
         }
@@ -1188,8 +1219,20 @@ export function AppContent() {
 
   // Active page
   const activePage: Page | null = useMemo(() => {
-    if (!workspace || !workspace.activePageId) return allPages[0] || null;
-    return allPages.find((p) => p.id === workspace.activePageId) || allPages[0] || null;
+    if (!workspace) return null;
+    if (workspace.activePageId) {
+      const match = allPages.find((p) => p.id === workspace.activePageId);
+      if (match) return match;
+    }
+    if (workspace.activeSectionId) {
+      const match = allPages.find((p) => p.sectionId === workspace.activeSectionId);
+      if (match) return match;
+    }
+    if (workspace.activeNotebookId) {
+      const match = allPages.find((p) => p.notebookId === workspace.activeNotebookId);
+      if (match) return match;
+    }
+    return allPages[0] || null;
   }, [workspace, allPages]);
 
   // Backlinks & Unlinked Mentions for active page
